@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import json
 import sys
 from pathlib import Path
 
@@ -38,6 +37,18 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def build_chart_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="loadtest chart",
+        description="Genera gráficos visuales a partir de un informe JSON de loadtest.",
+    )
+    parser.add_argument("report", type=Path, help="archivo JSON generado con --output")
+    parser.add_argument("-o", "--output-dir", type=Path, default=Path("charts"), help="directorio de salida (por defecto: charts)")
+    parser.add_argument("--format", choices=("png", "svg"), default="png", help="formato de salida (por defecto: png)")
+    parser.add_argument("--dpi", type=int, default=160, help="resolución para PNG (por defecto: 160)")
+    return parser
+
+
 def _print_report(report: LoadReport) -> None:
     print(f"\nPrueba completada: {report.method} {report.url}")
     print(f"Usuarios: {report.users} | Duración: {report.duration_seconds:.2f}s | Peticiones: {report.total_requests}")
@@ -49,7 +60,24 @@ def _print_report(report: LoadReport) -> None:
         print("Errores: " + ", ".join(f"{key}: {value}" for key, value in report.errors.items()))
 
 
+def _run_chart(argv: list[str]) -> int:
+    args = build_chart_parser().parse_args(argv)
+    try:
+        from .charts import generate_charts
+        outputs = generate_charts(args.report, args.output_dir, args.format, args.dpi)
+    except (OSError, RuntimeError, ValueError) as exc:
+        print(f"Error al generar gráficos: {exc}", file=sys.stderr)
+        return 2
+    print("Gráficos generados:")
+    for output in outputs:
+        print(f"- {output}")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
+    argv = list(sys.argv[1:] if argv is None else argv)
+    if argv and argv[0] == "chart":
+        return _run_chart(argv[1:])
     args = build_parser().parse_args(argv)
     if args.body and args.body_file:
         print("Usa solo una de --body o --body-file", file=sys.stderr)

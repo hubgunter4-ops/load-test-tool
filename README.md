@@ -1,15 +1,23 @@
 # Load Test Tool
 
-CLI autocontenido para **pruebas de carga HTTP concurrentes**, pensado para estresar endpoints de aplicaciones que consultan una base de datos y observar capacidad, errores y latencia. No requiere k6, JMeter ni paquetes de terceros: usa Python 3.10+.
+CLI autocontenido para **pruebas de carga HTTP concurrentes** y visualización de resultados, pensado para estresar endpoints de aplicaciones que consultan una base de datos y observar capacidad, errores y latencia.
 
 > Úsalo únicamente contra sistemas propios o para los que tengas autorización. Empieza en staging y aumenta la carga gradualmente.
 
 ## Instalación
 
+Para usar solo la prueba de carga:
+
 ```bash
 python3 -m venv .venv
 . .venv/bin/activate
 pip install -e .
+```
+
+Para habilitar la generación de gráficos:
+
+```bash
+pip install -e '.[charts]'
 ```
 
 También se puede ejecutar sin instalarlo:
@@ -18,7 +26,7 @@ También se puede ejecutar sin instalarlo:
 PYTHONPATH=. python3 -m loadtest.cli http://localhost:8000/health -u 20 -d 30 --ramp-up 10
 ```
 
-## Ejemplo
+## Ejecutar una prueba
 
 ```bash
 loadtest https://staging.example.com/api/orders \
@@ -33,8 +41,40 @@ Para un endpoint de escritura:
 ```bash
 loadtest http://localhost:8000/api/query -X POST \
   -H 'Content-Type: application/json' \
-  --body '{"query":"SELECT 1"}' -u 10 -d 20
+  --body '{"query":"SELECT 1"}' -u 10 -d 20 \
+  --output reports/query.json
 ```
+
+## Generar gráficos desde JSON
+
+El subcomando `chart` lee el informe generado con `--output` y crea tres gráficos estáticos:
+
+- `latency.png`: latencia mínima, promedio, p50, p95, p99 y máxima.
+- `status_codes.png`: distribución de códigos HTTP, diferenciando respuestas exitosas y errores.
+- `summary.png`: volumen de solicitudes e indicadores de RPS, error, usuarios y duración.
+
+```bash
+loadtest chart reports/orders.json --output-dir reports/orders-charts
+```
+
+Por defecto genera PNG. Para documentos o integración web puede generar SVG:
+
+```bash
+loadtest chart reports/orders.json \
+  --output-dir reports/orders-charts \
+  --format svg
+```
+
+Opciones del subcomando:
+
+| Opción | Predeterminado | Descripción |
+|---|---:|---|
+| `report` | — | Archivo JSON de resultados |
+| `--output-dir` | `charts` | Directorio de gráficos |
+| `--format` | `png` | `png` o `svg` |
+| `--dpi` | `160` | Resolución de los PNG |
+
+El JSON actual contiene métricas agregadas, por lo que los gráficos muestran el resumen de la prueba. Para una serie temporal por intervalo sería necesario ampliar el informe para conservar muestras durante la ejecución.
 
 ## Métricas
 
@@ -69,4 +109,4 @@ python3 -m unittest discover -v
 
 ## Estado del repositorio
 
-Versión inicial lista para ampliar con escenarios múltiples, límites de aceptación en CI y exportadores Prometheus/Grafana.
+Versión `0.2.0`, con pruebas de carga, exportación JSON y gráficos PNG/SVG.
