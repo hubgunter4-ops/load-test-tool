@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "load-test-tool"
+version = "0.1.0"
+description = "CLI de pruebas de carga HTTP concurrentes"
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [{name = "Equipo de Ingeniería"}]
+license = {text = "MIT"}
+
+[project.scripts]
+loadtest = "loadtest.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["loadtest*"]

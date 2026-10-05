@@ -1,0 +1,12 @@
+{
+  "url": "http://localhost:8000/api/query",
+  "method": "POST",
+  "users": 25,
+  "duration": 60,
+  "ramp_up": 15,
+  "headers": {
+    "Content-Type": "application/json",
+    "Authorization": "Bearer reemplazar-token"
+  },
+  "body": {"query": "SELECT ..."}
+}
