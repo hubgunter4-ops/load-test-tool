@@ -30,6 +30,8 @@ class LoadTestApp(tk.Tk):
         self._worker: threading.Thread | None = None
         self._last_report: LoadReport | None = None
         self._last_report_path: Path | None = None
+        self._latency_history: list[float] = []
+        self._status_counts: dict[str, int] = {}
         self._build_variables()
         self._build_style()
         self._build_layout()
@@ -132,6 +134,15 @@ class LoadTestApp(tk.Tk):
             ttk.Label(metrics, textvariable=variable, style="Metric.TLabel").grid(row=0, column=column, sticky="w", padx=(0, 14))
             metrics.columnconfigure(column, weight=1)
 
+        dashboard = ttk.LabelFrame(parent, text="Dashboard de ejecución", style="Section.TLabelframe", padding=8)
+        dashboard.pack(fill="x", pady=(0, 10))
+        self.dashboard_canvas = tk.Canvas(
+            dashboard, height=220, background="#ffffff", highlightthickness=1,
+            highlightbackground="#d8dee9",
+        )
+        self.dashboard_canvas.pack(fill="x", expand=True)
+        self.dashboard_canvas.bind("<Configure>", lambda _event: self._draw_dashboard())
+
         report_frame = ttk.LabelFrame(parent, text="Informe final", style="Section.TLabelframe", padding=10)
         report_frame.pack(fill="both", expand=True)
         self.report_text = tk.Text(report_frame, state="disabled", wrap="word", background="#f7f7f7")
@@ -187,6 +198,8 @@ class LoadTestApp(tk.Tk):
 
     def _prepare_run(self) -> None:
         self._last_report = None
+        self._latency_history.clear()
+        self._status_counts.clear()
         self.progress_var.set(0)
         self.request_var.set("Solicitudes: 0")
         self.rps_var.set("RPS: —")
@@ -194,6 +207,7 @@ class LoadTestApp(tk.Tk):
         self.latency_var.set("Latencia p95: —")
         self.status_var.set("Ejecutando…")
         self._set_text(self.report_text, "")
+        self._draw_dashboard()
         self._append_log("Inicio de la prueba")
         self.start_button.configure(state="disabled")
         self.stop_button.configure(state="normal")
@@ -230,10 +244,60 @@ class LoadTestApp(tk.Tk):
 
     def _update_progress(self, result: RequestResult) -> None:
         current = int(self.request_var.get().split(":", 1)[1].strip()) + 1
+        self._latency_history.append(result.latency_ms)
+        self._latency_history = self._latency_history[-120:]
+        status = str(result.status) if result.status is not None else "ERROR"
+        self._status_counts[status] = self._status_counts.get(status, 0) + 1
         self.request_var.set(f"Solicitudes: {current}")
         self.error_var.set(f"Errores: {1 if not result.ok else 0} en la última")
         self.latency_var.set(f"Última latencia: {result.latency_ms:.1f} ms")
+        self._draw_dashboard()
         self._append_log(f"HTTP {result.status or 'ERROR'} · {result.latency_ms:.1f} ms")
+
+    def _draw_dashboard(self) -> None:
+        """Dibuja el dashboard sin dependencias externas y desde el hilo de Tk."""
+        if not hasattr(self, "dashboard_canvas"):
+            return
+        canvas = self.dashboard_canvas
+        canvas.delete("all")
+        width = max(canvas.winfo_width(), 520)
+        height = max(canvas.winfo_height(), 180)
+        split = int(width * 0.62)
+        canvas.create_text(16, 16, anchor="w", text="Latencia por solicitud", fill="#25324b", font=("TkDefaultFont", 10, "bold"))
+        canvas.create_text(split + 18, 16, anchor="w", text="Respuestas HTTP", fill="#25324b", font=("TkDefaultFont", 10, "bold"))
+        left_x, left_y, left_w, left_h = 18, 34, split - 34, height - 52
+        right_x, right_y, right_w, right_h = split + 18, 42, width - split - 34, height - 60
+        for y_ratio in (0, 0.5, 1):
+            y = left_y + left_h * y_ratio
+            canvas.create_line(left_x, y, left_x + left_w, y, fill="#e5e7eb")
+        history = self._latency_history
+        if history:
+            maximum = max(max(history), 1.0)
+            points = []
+            for index, value in enumerate(history):
+                x = left_x + (index / max(len(history) - 1, 1)) * left_w
+                y = left_y + left_h - (value / maximum) * left_h
+                points.extend((x, y))
+            if len(points) >= 4:
+                canvas.create_line(*points, fill="#2563eb", width=2, smooth=True)
+            canvas.create_text(left_x + left_w, left_y + left_h + 12, anchor="e", text=f"última: {history[-1]:.1f} ms", fill="#64748b", font=("TkDefaultFont", 8))
+            canvas.create_text(left_x, left_y - 7, anchor="w", text=f"máx. {maximum:.1f} ms", fill="#64748b", font=("TkDefaultFont", 8))
+        else:
+            canvas.create_text(left_x + left_w / 2, left_y + left_h / 2, text="Inicia una prueba para ver la latencia", fill="#94a3b8")
+        statuses = self._status_counts
+        if statuses:
+            maximum = max(statuses.values())
+            bar_gap = max(4, right_h // max(len(statuses), 1) // 4)
+            bar_h = max(12, min(25, (right_h - bar_gap * (len(statuses) - 1)) // len(statuses)))
+            for index, (status, count) in enumerate(sorted(statuses.items())):
+                y = right_y + index * (bar_h + bar_gap)
+                bar_w = (count / maximum) * max(right_w - 64, 1)
+                color = "#16a34a" if status[:1] in {"2", "3"} else "#dc2626"
+                canvas.create_text(right_x, y + bar_h / 2, anchor="w", text=status, fill="#475569", font=("TkDefaultFont", 9))
+                canvas.create_rectangle(right_x + 42, y, right_x + 42 + bar_w, y + bar_h, fill=color, outline="")
+                canvas.create_text(right_x + 48 + bar_w, y + bar_h / 2, anchor="w", text=str(count), fill="#475569", font=("TkDefaultFont", 9))
+        else:
+            canvas.create_text(right_x + right_w / 2, right_y + right_h / 2, text="Sin respuestas todavía", fill="#94a3b8")
 
     def _complete(self, report: LoadReport) -> None:
         self._last_report = report

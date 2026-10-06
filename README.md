@@ -45,6 +45,8 @@ La ventana distribuye el flujo en cuatro áreas:
 
 La prueba se ejecuta en un hilo independiente para que la ventana no se congele. **Detener** activa una cancelación cooperativa y termina después de la petición que esté en curso. Al finalizar se guarda el JSON y, si está seleccionado, se generan automáticamente los tres gráficos. El botón **Generar gráficos desde JSON** permite reutilizar informes anteriores.
 
+El panel **Dashboard de ejecución** se actualiza durante la prueba con una línea de latencia por solicitud y barras de distribución de códigos HTTP. La vista previa de la distribución está disponible en [docs/dashboard-preview.svg](docs/dashboard-preview.svg).
+
 ## Ejecutar una prueba
 
 ```bash

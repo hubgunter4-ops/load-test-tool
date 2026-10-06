@@ -1,0 +1,69 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="900" viewBox="0 0 1440 900" role="img" aria-labelledby="title desc">
+  <title id="title">Vista previa del dashboard de Load Test Tool</title>
+  <desc id="desc">Interfaz de escritorio con configuración a la izquierda y dashboard de ejecución a la derecha.</desc>
+  <rect width="1440" height="900" fill="#f4f6f8"/>
+  <rect x="28" y="24" width="1384" height="852" rx="12" fill="#ffffff" stroke="#d8dee9"/>
+  <text x="54" y="66" font-family="Arial, sans-serif" font-size="27" font-weight="700" fill="#172033">Pruebas de carga</text>
+  <text x="54" y="94" font-family="Arial, sans-serif" font-size="15" fill="#64748b">Configura el escenario, ejecútalo en segundo plano y revisa el informe visual.</text>
+  <line x1="700" y1="122" x2="700" y2="842" stroke="#e2e8f0"/>
+  <text x="54" y="135" font-family="Arial, sans-serif" font-size="15" font-weight="700" fill="#25324b">1. Endpoint y concurrencia</text>
+  <rect x="54" y="150" width="610" height="222" rx="8" fill="#fbfcfd" stroke="#d8dee9"/>
+  <text x="72" y="178" font-family="Arial, sans-serif" font-size="12" fill="#475569">URL</text>
+  <rect x="72" y="188" width="574" height="34" rx="5" fill="#ffffff" stroke="#cbd5e1"/>
+  <text x="84" y="210" font-family="Arial, sans-serif" font-size="13" fill="#334155">http://localhost:8000/health</text>
+  <text x="72" y="252" font-family="Arial, sans-serif" font-size="12" fill="#475569">Método</text>
+  <rect x="72" y="262" width="112" height="34" rx="5" fill="#ffffff" stroke="#cbd5e1"/>
+  <text x="84" y="284" font-family="Arial, sans-serif" font-size="13" fill="#334155">GET        ▾</text>
+  <text x="212" y="252" font-family="Arial, sans-serif" font-size="12" fill="#475569">Usuarios</text>
+  <rect x="212" y="262" width="130" height="34" rx="5" fill="#ffffff" stroke="#cbd5e1"/>
+  <text x="224" y="284" font-family="Arial, sans-serif" font-size="13" fill="#334155">25</text>
+  <text x="370" y="252" font-family="Arial, sans-serif" font-size="12" fill="#475569">Duración (s)</text>
+  <rect x="370" y="262" width="130" height="34" rx="5" fill="#ffffff" stroke="#cbd5e1"/>
+  <text x="382" y="284" font-family="Arial, sans-serif" font-size="13" fill="#334155">60</text>
+  <text x="528" y="252" font-family="Arial, sans-serif" font-size="12" fill="#475569">Rampa (s)</text>
+  <rect x="528" y="262" width="118" height="34" rx="5" fill="#ffffff" stroke="#cbd5e1"/>
+  <text x="540" y="284" font-family="Arial, sans-serif" font-size="13" fill="#334155">15</text>
+  <text x="54" y="407" font-family="Arial, sans-serif" font-size="15" font-weight="700" fill="#25324b">2. Petición</text>
+  <rect x="54" y="422" width="610" height="205" rx="8" fill="#fbfcfd" stroke="#d8dee9"/>
+  <text x="72" y="450" font-family="Arial, sans-serif" font-size="12" fill="#475569">Cabeceras (una por línea: Nombre: valor)</text>
+  <rect x="72" y="460" width="574" height="58" rx="5" fill="#ffffff" stroke="#cbd5e1"/>
+  <text x="84" y="484" font-family="Arial, sans-serif" font-size="12" fill="#334155">Content-Type: application/json</text>
+  <text x="84" y="504" font-family="Arial, sans-serif" font-size="12" fill="#334155">Authorization: Bearer token</text>
+  <text x="72" y="550" font-family="Arial, sans-serif" font-size="12" fill="#475569">Cuerpo de la petición (opcional)</text>
+  <rect x="72" y="560" width="574" height="48" rx="5" fill="#ffffff" stroke="#cbd5e1"/>
+  <text x="84" y="589" font-family="Arial, sans-serif" font-size="12" fill="#334155">{"query":"SELECT 1"}</text>
+  <rect x="54" y="662" width="176" height="38" rx="6" fill="#2563eb"/>
+  <text x="76" y="687" font-family="Arial, sans-serif" font-size="13" font-weight="700" fill="#ffffff">▶  Iniciar prueba</text>
+  <rect x="240" y="662" width="106" height="38" rx="6" fill="#ffffff" stroke="#cbd5e1"/>
+  <text x="260" y="687" font-family="Arial, sans-serif" font-size="13" fill="#334155">■  Detener</text>
+  <text x="54" y="767" font-family="Arial, sans-serif" font-size="15" font-weight="700" fill="#25324b">3. Salida</text>
+  <text x="54" y="795" font-family="Arial, sans-serif" font-size="12" fill="#475569">Informe JSON: reports/load-report.json</text>
+  <text x="54" y="820" font-family="Arial, sans-serif" font-size="12" fill="#475569">Gráficos: reports/charts  ·  PNG  ·  ✓ TLS</text>
+  <text x="730" y="135" font-family="Arial, sans-serif" font-size="15" font-weight="700" fill="#25324b">Ejecución</text>
+  <rect x="730" y="150" width="634" height="74" rx="8" fill="#fbfcfd" stroke="#d8dee9"/>
+  <text x="750" y="180" font-family="Arial, sans-serif" font-size="13" fill="#334155">Prueba en ejecución…</text>
+  <rect x="750" y="194" width="594" height="10" rx="5" fill="#e2e8f0"/>
+  <rect x="750" y="194" width="372" height="10" rx="5" fill="#2563eb"/>
+  <text x="730" y="257" font-family="Arial, sans-serif" font-size="15" font-weight="700" fill="#25324b">Métricas en vivo</text>
+  <rect x="730" y="272" width="634" height="72" rx="8" fill="#fbfcfd" stroke="#d8dee9"/>
+  <text x="750" y="302" font-family="Arial, sans-serif" font-size="12" fill="#64748b">Solicitudes</text><text x="750" y="326" font-family="Arial, sans-serif" font-size="19" font-weight="700" fill="#172033">1,284</text>
+  <text x="910" y="302" font-family="Arial, sans-serif" font-size="12" fill="#64748b">RPS</text><text x="910" y="326" font-family="Arial, sans-serif" font-size="19" font-weight="700" fill="#172033">42.8</text>
+  <text x="1050" y="302" font-family="Arial, sans-serif" font-size="12" fill="#64748b">Errores</text><text x="1050" y="326" font-family="Arial, sans-serif" font-size="19" font-weight="700" fill="#dc2626">3 (0.23%)</text>
+  <text x="1230" y="302" font-family="Arial, sans-serif" font-size="12" fill="#64748b">p95</text><text x="1230" y="326" font-family="Arial, sans-serif" font-size="19" font-weight="700" fill="#172033">18.4 ms</text>
+  <text x="730" y="377" font-family="Arial, sans-serif" font-size="15" font-weight="700" fill="#25324b">Dashboard de ejecución</text>
+  <rect x="730" y="392" width="634" height="218" rx="8" fill="#ffffff" stroke="#d8dee9"/>
+  <text x="750" y="420" font-family="Arial, sans-serif" font-size="12" font-weight="700" fill="#25324b">Latencia por solicitud</text>
+  <text x="1130" y="420" font-family="Arial, sans-serif" font-size="12" font-weight="700" fill="#25324b">Respuestas HTTP</text>
+  <line x1="750" y1="570" x2="1100" y2="570" stroke="#e5e7eb"/><line x1="750" y1="495" x2="1100" y2="495" stroke="#e5e7eb"/>
+  <polyline points="750,540 790,530 830,545 870,500 910,515 950,470 990,488 1030,455 1070,475 1100,450" fill="none" stroke="#2563eb" stroke-width="3"/>
+  <text x="750" y="590" font-family="Arial, sans-serif" font-size="10" fill="#64748b">última: 14.2 ms</text>
+  <text x="1130" y="455" font-family="Arial, sans-serif" font-size="11" fill="#475569">200</text><rect x="1170" y="444" width="155" height="18" rx="3" fill="#16a34a"/><text x="1332" y="458" font-family="Arial, sans-serif" font-size="11" fill="#475569">1,281</text>
+  <text x="1130" y="493" font-family="Arial, sans-serif" font-size="11" fill="#475569">500</text><rect x="1170" y="482" width="9" height="18" rx="3" fill="#dc2626"/><text x="1187" y="496" font-family="Arial, sans-serif" font-size="11" fill="#475569">3</text>
+  <text x="730" y="651" font-family="Arial, sans-serif" font-size="15" font-weight="700" fill="#25324b">Informe final</text>
+  <rect x="730" y="666" width="634" height="90" rx="8" fill="#f7f7f7" stroke="#d8dee9"/>
+  <text x="750" y="692" font-family="monospace" font-size="11" fill="#475569">{ "total_requests": 1284, "successful_requests": 1281,</text>
+  <text x="750" y="712" font-family="monospace" font-size="11" fill="#475569">  "requests_per_second": 42.8, "error_rate_percent": 0.23 }</text>
+  <text x="730" y="798" font-family="Arial, sans-serif" font-size="15" font-weight="700" fill="#25324b">Registro</text>
+  <rect x="730" y="810" width="634" height="35" rx="8" fill="#f7f7f7" stroke="#d8dee9"/>
+  <text x="750" y="833" font-family="monospace" font-size="11" fill="#64748b">HTTP 200 · 14.2 ms  ·  HTTP 200 · 11.8 ms  ·  HTTP 500 · 22.4 ms</text>
+</svg>
