@@ -39,6 +39,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("-o", "--output", type=Path, help="guardar el informe JSON en este archivo")
     parser.add_argument("--scenario", choices=SCENARIO_MODES, default="Carga estándar", help="escenario de estrés a ejecutar")
     parser.add_argument("--scenario-params", default="{}", help="JSON; throughput: method/payload_size, PPS: host/port/pps/packet_size")
+    parser.add_argument("--loop", action="store_true", help="repetir la acción completa de forma acotada")
+    parser.add_argument("--loop-count", type=int, default=1, help="iteraciones del bucle, entre 1 y 100")
+    parser.add_argument("--loop-delay", type=float, default=0, help="pausa entre iteraciones en segundos, entre 0 y 3600")
     return parser
 
 
@@ -77,6 +80,9 @@ def build_external_parser() -> argparse.ArgumentParser:
     parser.add_argument("-o", "--output", default="", help="guardar plan JSON o script Pktgen")
     parser.add_argument("--execute", action="store_true", help="ejecutar el motor externo; omitido por defecto")
     parser.add_argument("--authorized", action="store_true", help="confirma que el destino está autorizado")
+    parser.add_argument("--loop", action="store_true", help="repetir el plan externo de forma acotada")
+    parser.add_argument("--loop-count", type=int, default=1, help="iteraciones del plan, entre 1 y 100")
+    parser.add_argument("--loop-delay", type=float, default=0, help="pausa entre iteraciones en segundos")
     return parser
 
 
@@ -119,6 +125,8 @@ def _run_external(argv: list[str]) -> int:
         output=args.output,
     )
     try:
+        if args.loop_count < 1 or args.loop_count > 100 or args.loop_delay < 0 or args.loop_delay > 3600:
+            raise ExternalToolError("el bucle debe tener 1-100 iteraciones y una pausa de 0-3600 segundos")
         if args.execute:
             result = execute(config, authorized=args.authorized)
             if hasattr(result, "stdout"):
@@ -129,6 +137,9 @@ def _run_external(argv: list[str]) -> int:
             print(f"Script Pktgen escrito en {result}")
             return 0
         rendered = plan_json(config)
+        rendered_data = json.loads(rendered)
+        rendered_data["loop"] = {"enabled": args.loop, "iterations": args.loop_count if args.loop else 1, "delay_seconds": args.loop_delay if args.loop else 0}
+        rendered = json.dumps(rendered_data, indent=2, ensure_ascii=False)
         if args.output:
             output = Path(args.output)
             output.parent.mkdir(parents=True, exist_ok=True)
@@ -188,7 +199,13 @@ def main(argv: list[str] | None = None) -> int:
             raise ValueError(f"--scenario-params no es JSON válido: {exc.msg}") from exc
         if not isinstance(scenario_params, dict):
             raise ValueError("--scenario-params debe ser un objeto JSON")
-        scenario_report = asyncio.run(run_scenario(ScenarioConfig(config, args.scenario, scenario_params)))
+        if args.loop_count < 1 or args.loop_count > 100 or args.loop_delay < 0 or args.loop_delay > 3600:
+            raise ValueError("el bucle debe tener 1-100 iteraciones y una pausa de 0-3600 segundos")
+        scenario_report = asyncio.run(run_scenario(ScenarioConfig(
+            config, args.scenario, scenario_params,
+            iterations=args.loop_count if args.loop else 1,
+            loop_delay=args.loop_delay if args.loop else 0,
+        )))
         report = scenario_report.aggregate
     except (OSError, ValueError, argparse.ArgumentTypeError) as exc:
         print(f"Error: {exc}", file=sys.stderr)

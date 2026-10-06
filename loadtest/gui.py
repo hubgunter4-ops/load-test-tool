@@ -14,7 +14,7 @@ from typing import Any
 
 from .charts import generate_charts
 from .external_tools import EXECUTION_ENGINES, plan
-from .gui_config import GuiValues, external_config_from_values, scenario_from_values
+from .gui_config import GuiValues, external_config_from_values, loop_settings_from_values, scenario_from_values
 from .runner import LoadReport, RequestResult
 from .scenarios import SCENARIO_MODES, SCENARIO_PARAMS_EXAMPLES, ScenarioReport, run_scenario, scenario_json
 
@@ -62,6 +62,9 @@ class LoadTestApp(tk.Tk):
         self.external_destination_var = tk.StringVar(value="")
         self.external_protocol_var = tk.StringVar(value="tcp")
         self.external_count_var = tk.StringVar(value="1000")
+        self.loop_enabled_var = tk.BooleanVar(value=False)
+        self.loop_count_var = tk.StringVar(value="1")
+        self.loop_delay_var = tk.StringVar(value="0")
         self.users_var = tk.StringVar(value="10")
         self.duration_var = tk.StringVar(value="30")
         self.ramp_var = tk.StringVar(value="0")
@@ -198,6 +201,11 @@ class LoadTestApp(tk.Tk):
         ttk.Combobox(output, textvariable=self.format_var, values=("png", "svg"), state="readonly", width=8).grid(row=5, column=0, sticky="w")
         ttk.Checkbutton(output, text="Generar gráficos automáticamente al terminar", variable=self.auto_charts_var).grid(row=5, column=1, columnspan=2, sticky="w", padx=(10, 0))
         ttk.Checkbutton(output, text="Verificar certificado TLS", variable=self.tls_var).grid(row=6, column=0, columnspan=3, sticky="w", pady=(7, 0))
+        ttk.Checkbutton(output, text="✅ Ejecutar acciones en bucle", variable=self.loop_enabled_var).grid(row=7, column=0, sticky="w", pady=(7, 0))
+        ttk.Label(output, text="Iteraciones (máx. 100)").grid(row=8, column=0, sticky="w")
+        ttk.Entry(output, textvariable=self.loop_count_var, width=12).grid(row=9, column=0, sticky="w")
+        ttk.Label(output, text="Pausa entre ciclos (s)").grid(row=8, column=1, sticky="w")
+        ttk.Entry(output, textvariable=self.loop_delay_var, width=12).grid(row=9, column=1, sticky="w")
 
         controls = ttk.Frame(parent)
         controls.pack(fill="x", pady=(12, 0))
@@ -318,6 +326,7 @@ class LoadTestApp(tk.Tk):
             external_rate=self.external_rate_var.get(), external_interface=self.external_interface_var.get(),
             external_destination=self.external_destination_var.get(), external_protocol=self.external_protocol_var.get(),
             external_count=self.external_count_var.get(),
+            loop_enabled=self.loop_enabled_var.get(), loop_count=self.loop_count_var.get(), loop_delay=self.loop_delay_var.get(),
         )
 
     def _start(self) -> None:
@@ -328,6 +337,8 @@ class LoadTestApp(tk.Tk):
             try:
                 external = external_config_from_values(values)
                 result = plan(external)
+                iterations, delay = loop_settings_from_values(values)
+                result["loop"] = {"enabled": values.loop_enabled, "iterations": iterations, "delay_seconds": delay}
                 report_path = Path(values.report_path).expanduser()
                 report_path.parent.mkdir(parents=True, exist_ok=True)
                 report_path.write_text(json.dumps(result, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")

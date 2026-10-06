@@ -16,7 +16,7 @@ from textual.widgets import Button, Checkbox, Footer, Header, Input, Label, Prog
 from .cli import _run_chart
 from .charts import generate_charts
 from .external_tools import EXECUTION_ENGINES, plan
-from .gui_config import GuiValues, external_config_from_values, scenario_from_values
+from .gui_config import GuiValues, external_config_from_values, loop_settings_from_values, scenario_from_values
 from .runner import RequestResult
 from .scenarios import SCENARIO_MODES, SCENARIO_PARAMS_EXAMPLES, ScenarioReport, run_scenario, scenario_json
 
@@ -181,6 +181,12 @@ class LoadTestTui(App[None]):
                     yield Select.from_values(("tcp", "udp"), value="tcp", id="external-protocol")
                     yield Label("Paquetes Pktgen", classes="field-label")
                     yield Input("1000", id="external-count", type="integer")
+                yield Checkbox("✅ Ejecutar acciones en bucle", value=False, id="loop-enabled")
+                with Grid(id="loop-fields"):
+                    yield Label("Iteraciones (máx. 100)", classes="field-label")
+                    yield Input("1", id="loop-count", type="integer")
+                    yield Label("Pausa entre ciclos (s)", classes="field-label")
+                    yield Input("0", id="loop-delay", type="number")
                 yield Static("", id="scenario-note")
                 with Vertical(id="request-fields"):
                     yield Label("Tipo de target", classes="field-label")
@@ -256,6 +262,8 @@ class LoadTestTui(App[None]):
             try:
                 external = external_config_from_values(values)
                 result = plan(external)
+                iterations, delay = loop_settings_from_values(values)
+                result["loop"] = {"enabled": values.loop_enabled, "iterations": iterations, "delay_seconds": delay}
                 report_path = Path(values.report_path).expanduser()
                 report_path.parent.mkdir(parents=True, exist_ok=True)
                 rendered = json.dumps(result, indent=2, ensure_ascii=False)
@@ -423,6 +431,9 @@ class LoadTestTui(App[None]):
             external_destination=self.query_one("#external-destination", Input).value,
             external_protocol=str(self.query_one("#external-protocol", Select).value),
             external_count=self.query_one("#external-count", Input).value,
+            loop_enabled=self.query_one("#loop-enabled", Checkbox).value,
+            loop_count=self.query_one("#loop-count", Input).value,
+            loop_delay=self.query_one("#loop-delay", Input).value,
         )
 
     def action_request_quit(self) -> None:

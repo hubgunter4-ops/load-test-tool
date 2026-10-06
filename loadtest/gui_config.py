@@ -40,6 +40,9 @@ class GuiValues:
     external_destination: str = ""
     external_protocol: str = "tcp"
     external_count: str = "1000"
+    loop_enabled: bool = False
+    loop_count: str = "1"
+    loop_delay: str = "0"
 
 
 def parse_headers_text(value: str) -> dict[str, str]:
@@ -116,7 +119,22 @@ def scenario_from_values(values: GuiValues) -> ScenarioConfig:
             pps=_positive_integer(values.pps_rate, "PPS", 1000),
             packet_size=_positive_integer(values.pps_packet_size, "Tamaño del datagrama", 1200),
         )
-    return ScenarioConfig(base=config_from_values(values), mode=values.scenario, params=params)
+    iterations, loop_delay = loop_settings_from_values(values)
+    return ScenarioConfig(base=config_from_values(values), mode=values.scenario, params=params, iterations=iterations, loop_delay=loop_delay)
+
+
+def loop_settings_from_values(values: GuiValues) -> tuple[int, float]:
+    """Valida la selección de bucle y devuelve iteraciones y pausa entre ciclos."""
+    if not values.loop_enabled:
+        return 1, 0.0
+    iterations = _positive_integer(values.loop_count, "Iteraciones del bucle", 100)
+    try:
+        delay = float(values.loop_delay)
+    except ValueError as exc:
+        raise ValueError("La pausa del bucle debe ser numérica") from exc
+    if delay < 0 or delay > 3600:
+        raise ValueError("La pausa del bucle debe estar entre 0 y 3600 segundos")
+    return iterations, delay
 
 
 def external_config_from_values(values: GuiValues) -> ExternalConfig:

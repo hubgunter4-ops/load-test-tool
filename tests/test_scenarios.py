@@ -88,6 +88,18 @@ class ScenarioTests(unittest.TestCase):
         )))
         self.assertEqual([phase["users"] for phase in report.phases], [1, 2, 4, 2, 1])
 
+    def test_loop_repeats_action_and_aggregates_phases(self):
+        report = asyncio.run(run_scenario(ScenarioConfig(
+            self.base(duration=0.1, users=1), "Carga estándar", {}, iterations=2, loop_delay=0.01
+        )))
+        self.assertEqual(report.scenario, "Carga estándar · bucle x2")
+        self.assertEqual({phase["loop"] for phase in report.phases}, {1, 2})
+        self.assertGreaterEqual(report.aggregate.total_requests, 0)
+
+    def test_loop_rejects_unbounded_iterations(self):
+        with self.assertRaisesRegex(ValueError, "1 y 100"):
+            asyncio.run(run_scenario(ScenarioConfig(self.base(), iterations=101)))
+
     def test_recovery_records_controlled_failures(self):
         report = asyncio.run(run_scenario(ScenarioConfig(self.base(duration=0.2), "Recuperación y fallos", {})))
         self.assertGreater(report.aggregate.failed_requests, 0)

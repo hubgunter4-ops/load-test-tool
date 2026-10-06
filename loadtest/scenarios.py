@@ -53,6 +53,8 @@ class ScenarioConfig:
     base: LoadConfig
     mode: str = "Carga estándar"
     params: dict[str, Any] = field(default_factory=dict)
+    iterations: int = 1
+    loop_delay: float = 0.0
 
 
 @dataclass
@@ -337,6 +339,12 @@ async def run_scenario(
     base = scenario.base
     mode = scenario.mode
     params = scenario.params
+    if scenario.iterations < 1 or scenario.iterations > 100:
+        raise ValueError("iterations debe estar entre 1 y 100")
+    if scenario.loop_delay < 0 or scenario.loop_delay > 3600:
+        raise ValueError("loop_delay debe estar entre 0 y 3600 segundos")
+    if scenario.iterations > 1:
+        return await run_scenario_loop(scenario, on_progress, on_phase, stop_event)
     if mode not in SCENARIO_MODES:
         raise ValueError(f"Escenario no soportado: {mode}")
     total_duration = base.duration
@@ -462,6 +470,45 @@ async def run_scenario(
             on_phase(labels.get(mode, f"Fase {index}/{len(phases)}"), index, len(phases))
         reports.append(await run_load(phase, on_progress, stop_event))
     return _aggregate(reports or [LoadReport(base.url, base.method, base.users, 0.001, 0, 0, 0, 0.0, 0.0, {"min": None, "avg": None, "p50": None, "p95": None, "p99": None, "max": None}, {}, {})], base, mode)
+
+
+async def run_scenario_loop(
+    scenario: ScenarioConfig,
+    on_progress: ProgressCallback | None = None,
+    on_phase: PhaseCallback | None = None,
+    stop_event=None,
+) -> ScenarioReport:
+    """Repite una acción completa un número finito de veces y agrega sus fases."""
+    reports: list[ScenarioReport] = []
+    single = ScenarioConfig(scenario.base, scenario.mode, scenario.params, iterations=1, loop_delay=0.0)
+    for iteration in range(1, scenario.iterations + 1):
+        if stop_event and stop_event.is_set():
+            break
+
+        def phase_callback(name: str, index: int, total: int, current=iteration) -> None:
+            if on_phase:
+                on_phase(f"Bucle {current}/{scenario.iterations} · {name}", index, total)
+
+        reports.append(await run_scenario(single, on_progress, phase_callback, stop_event))
+        if iteration < scenario.iterations and scenario.loop_delay and not (stop_event and stop_event.is_set()):
+            await asyncio.sleep(scenario.loop_delay)
+
+    elapsed = sum(report.aggregate.duration_seconds for report in reports)
+    elapsed += max(0, len(reports) - 1) * scenario.loop_delay
+    aggregate = _aggregate(
+        [report.aggregate for report in reports] or [
+            LoadReport(scenario.base.url, scenario.base.method, scenario.base.users, 0.001, 0, 0, 0, 0.0, 0.0,
+                       {"min": None, "avg": None, "p50": None, "p95": None, "p99": None, "max": None}, {}, {})
+        ],
+        scenario.base,
+        f"{scenario.mode} · bucle x{scenario.iterations}",
+        elapsed_override=max(elapsed, 0.001),
+    )
+    phases: list[dict[str, Any]] = []
+    for iteration, report in enumerate(reports, start=1):
+        for phase in report.phases:
+            phases.append({"loop": iteration, **phase})
+    return ScenarioReport(scenario=f"{scenario.mode} · bucle x{scenario.iterations}", aggregate=aggregate.aggregate, phases=phases)
 
 
 def scenario_json(report: ScenarioReport) -> str:

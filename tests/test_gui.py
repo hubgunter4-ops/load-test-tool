@@ -1,6 +1,6 @@
 import unittest
 
-from loadtest.gui_config import GuiValues, config_from_values, external_config_from_values, parse_headers_text, scenario_from_values
+from loadtest.gui_config import GuiValues, config_from_values, external_config_from_values, loop_settings_from_values, parse_headers_text, scenario_from_values
 
 
 class GuiHelpersTests(unittest.TestCase):
@@ -114,6 +114,21 @@ class GuiHelpersTests(unittest.TestCase):
         config = external_config_from_values(values)
         self.assertEqual(config.tool, "pktgen")
         self.assertEqual(config.destination, "198.18.0.2")
+
+    def test_loop_selection_is_bounded_and_optional(self):
+        values = GuiValues("http://localhost", "GET", "2", "1", "0", "1", "", "", True, "report.json", "charts", "png", False)
+        self.assertEqual(loop_settings_from_values(values), (1, 0.0))
+        enabled = GuiValues(
+            "http://localhost", "GET", "2", "1", "0", "1", "", "", True, "report.json", "charts", "png", False,
+            loop_enabled=True, loop_count="3", loop_delay="0.25",
+        )
+        self.assertEqual(loop_settings_from_values(enabled), (3, 0.25))
+        invalid = GuiValues(
+            "http://localhost", "GET", "2", "1", "0", "1", "", "", True, "report.json", "charts", "png", False,
+            loop_enabled=True, loop_count="101",
+        )
+        with self.assertRaisesRegex(ValueError, "entre 1 y 100"):
+            loop_settings_from_values(invalid)
 
 
 if __name__ == "__main__":
