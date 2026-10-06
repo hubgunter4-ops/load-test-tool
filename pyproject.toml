@@ -5,9 +5,10 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "load-test-tool"
 version = "0.4.0"
-description = "CLI e interfaz Tkinter para escenarios de estrés HTTP y visualización de resultados"
+description = "TUI e interfaz Tkinter para escenarios de estrés HTTP y visualización de resultados"
 readme = "README.md"
 requires-python = ">=3.10"
+dependencies = ["textual>=0.50"]
 authors = [{name = "Equipo de Ingeniería"}]
 license = {text = "MIT"}
 
@@ -15,7 +16,8 @@ license = {text = "MIT"}
 charts = ["matplotlib>=3.7"]
 
 [project.scripts]
-loadtest = "loadtest.cli:main"
+loadtest = "loadtest.tui:main"
+loadtest-cli = "loadtest.cli:main"
 loadtest-gui = "loadtest.gui:main"
 
 [tool.setuptools.packages.find]

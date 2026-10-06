@@ -1,17 +1,18 @@
 # Load Test Tool
 
-CLI autocontenido para **pruebas de carga HTTP concurrentes** y visualización de resultados, pensado para estresar endpoints de aplicaciones que consultan una base de datos y observar capacidad, errores y latencia.
+Herramienta de terminal interactiva para **pruebas de carga HTTP concurrentes** y visualización de resultados, pensada para estresar endpoints de aplicaciones que consultan una base de datos y observar capacidad, errores y latencia.
 
 > Úsalo únicamente contra sistemas propios o para los que tengas autorización. Empieza en staging y aumenta la carga gradualmente.
 
 ## Instalación
 
-Para usar solo la prueba de carga:
+Instala y ejecuta la interfaz de terminal:
 
 ```bash
 python3 -m venv .venv
 . .venv/bin/activate
 pip install -e .
+loadtest
 ```
 
 Para habilitar la generación de gráficos:
@@ -22,15 +23,11 @@ pip install -e '.[charts]'
 
 Tkinter normalmente viene incluido con Python. En distribuciones Linux que lo separan del intérprete puede ser necesario instalar el paquete del sistema `python3-tk`.
 
-También se puede ejecutar sin instalarlo:
-
-```bash
-PYTHONPATH=. python3 -m loadtest.cli http://localhost:8000/health -u 20 -d 30 --ramp-up 10
-```
+La pantalla permite configurar URL, método, concurrencia, duración, cabeceras, cuerpo, escenarios y exportación JSON. Durante la prueba muestra solicitudes, RPS, errores, latencia reciente y eventos; **Detener** cancela después de la petición en curso.
 
 ## Interfaz gráfica Tkinter
 
-Para ejecutar la herramienta desde una interfaz visual:
+Para usar la ventana gráfica Tkinter:
 
 ```bash
 loadtest-gui
@@ -49,7 +46,7 @@ El panel **Dashboard de ejecución** se actualiza durante la prueba con una lín
 
 ### Escenarios de estrés
 
-La GUI y el motor comparten un selector de escenarios. Los parámetros específicos se introducen como JSON en la sección **Tipo de prueba**:
+La GUI Tkinter, la TUI y el motor comparten el selector de escenarios. Los parámetros específicos se introducen como JSON en la sección **Tipo de prueba**; al cambiar de escenario, ambas interfaces muestran un ejemplo de sus parámetros:
 
 | Orden | Escenario | Parámetros principales |
 |---:|---|---|
@@ -60,6 +57,11 @@ La GUI y el motor comparten un selector de escenarios. Los parámetros específi
 | 5 | **Recuperación y fallos** | `failure_url` opcional; por defecto usa un fallo local controlado |
 | 6 | **Prueba específica de base de datos** | `query_type` para etiquetar la consulta |
 | 7 | **Payload y rate limiting** | `payload_size`, `payload_seed` y `rate_limit` |
+| 8 | **Estrés de Protocolo y Red (Capa de Aplicación y Transporte)** | `methods` para recorrer métodos HTTP y `connection_close` para solicitar el cierre por petición |
+| 9 | **Throughput Stress** | `method` y `payload_size` (predeterminado: `POST`, `262144` bytes; máximo: `16777216`); informa bytes HTTP y Mbps de payload |
+| 10 | **PPS Stress** | `host`, `port`, `pps`, `packet_size` (predeterminados: `127.0.0.1`, `9000`, `100`, `512` bytes); genera tráfico UDP saliente |
+
+En la TUI y Tkinter, al seleccionar **Throughput Stress** o **PPS Stress** aparecen campos editables para estos valores y se precargan los predeterminados indicados. Para el resto de escenarios se mantiene el editor JSON; la CLI recibe los mismos campos mediante `--scenario-params`.
 
 Ejemplos de parámetros:
 
@@ -82,12 +84,26 @@ Ejemplos de parámetros:
 {"payload_size": 4096, "payload_seed": "sample", "rate_limit": 50}
 ```
 
-Cada modo genera el mismo formato de métricas agregadas y conserva `scenario` y `phases` en el JSON para que el dashboard y los gráficos puedan comparar fases. La prueba de recuperación usa por defecto `127.0.0.1:1` para producir un fallo controlado sin enviar tráfico a terceros.
+```json
+{"methods": ["GET", "HEAD", "POST"], "connection_close": true}
+```
 
-## Ejecutar una prueba
+```json
+{"method": "POST", "payload_size": 262144}
+```
+
+```json
+{"host": "127.0.0.1", "port": 9000, "pps": 100, "packet_size": 512}
+```
+
+El escenario de protocolo divide la duración entre los métodos indicados (`GET`, `HEAD`, `POST`, `PUT`, `PATCH` y `DELETE`) y registra métricas para cada fase. `connection_close` agrega `Connection: close` a las peticiones. El cliente usa HTTP/1.1 mediante `urllib`; no genera tráfico HTTP/2 ni pruebas TCP crudas. **Throughput Stress** mide bytes del payload HTTP, no cabeceras ni sobrecarga TLS. **PPS Stress** admite IPs y nombres DNS con destinos salientes, pero debe apuntarse solo a sistemas para los que tengas autorización. Limita cada ejecución a 1.000 datagramas/s, 1.200 bytes por datagrama y 60 segundos; el reporte cuenta datagramas aceptados por el socket local, no confirma su recepción remota. Cada modo conserva `scenario` y `phases` en el JSON para comparar fases. La prueba de recuperación usa por defecto `127.0.0.1:1` para producir un fallo controlado.
+
+## Ejecución clásica por argumentos
+
+La interfaz de terminal es el comando principal. La CLI anterior sigue disponible como `loadtest-cli` para scripts y automatización:
 
 ```bash
-loadtest https://staging.example.com/api/orders \
+loadtest-cli https://staging.example.com/api/orders \
   --users 50 --duration 120 --ramp-up 30 \
   -H 'Authorization: Bearer TOKEN' \
   -H 'Accept: application/json' \
@@ -97,7 +113,7 @@ loadtest https://staging.example.com/api/orders \
 Para un endpoint de escritura:
 
 ```bash
-loadtest http://localhost:8000/api/query -X POST \
+loadtest-cli http://localhost:8000/api/query -X POST \
   -H 'Content-Type: application/json' \
   --body '{"query":"SELECT 1"}' -u 10 -d 20 \
   --output reports/query.json
@@ -106,7 +122,7 @@ loadtest http://localhost:8000/api/query -X POST \
 También se puede ejecutar un escenario desde la terminal:
 
 ```bash
-loadtest https://staging.example.com/health \
+loadtest-cli https://staging.example.com/health \
   --scenario "Spike Test" \
   --scenario-params '{"peak_users":250}' \
   --users 20 --duration 60 --output reports/spike.json

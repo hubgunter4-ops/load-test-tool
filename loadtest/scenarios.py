@@ -2,7 +2,10 @@
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import json
+import socket
+import time
 from dataclasses import dataclass, field
 from typing import Any, Callable
 from urllib.parse import urlparse, urlunparse
@@ -18,7 +21,24 @@ SCENARIO_MODES = (
     "Recuperación y fallos",
     "Prueba específica de base de datos",
     "Payload y rate limiting",
+    "Estrés de Protocolo y Red (Capa de Aplicación y Transporte)",
+    "Throughput Stress",
+    "PPS Stress",
 )
+
+SCENARIO_PARAMS_EXAMPLES = {
+    "Carga estándar": "{}",
+    "Spike Test": '{\n  "peak_users": 100\n}',
+    "Stress Test progresivo": '{\n  "stages": [10, 25, 50, 100]\n}',
+    "Soak Test": "{}",
+    "Escenarios mixtos": '{\n  "mix": [{"url": "http://localhost:8000/health", "weight": 1}]\n}',
+    "Recuperación y fallos": '{\n  "failure_url": "http://127.0.0.1:1/forced-failure"\n}',
+    "Prueba específica de base de datos": '{\n  "query_type": "lectura_simple"\n}',
+    "Payload y rate limiting": '{\n  "payload_size": 4096,\n  "rate_limit": 50\n}',
+    "Estrés de Protocolo y Red (Capa de Aplicación y Transporte)": '{\n  "methods": ["GET", "HEAD"],\n  "connection_close": true\n}',
+    "Throughput Stress": '{\n  "method": "POST",\n  "payload_size": 262144\n}',
+    "PPS Stress": '{\n  "host": "127.0.0.1",\n  "port": 9000,\n  "pps": 100,\n  "packet_size": 512\n}',
+}
 
 ProgressCallback = Callable[[RequestResult], None]
 PhaseCallback = Callable[[str, int, int], None]
@@ -59,14 +79,23 @@ def _positive_int(params: dict[str, Any], key: str, default: int) -> int:
     return value
 
 
-def _phase_config(base: LoadConfig, users: int, duration: float, *, url: str | None = None, body: bytes | None = None) -> LoadConfig:
+def _phase_config(
+    base: LoadConfig,
+    users: int,
+    duration: float,
+    *,
+    url: str | None = None,
+    body: bytes | None = None,
+    method: str | None = None,
+    headers: dict[str, str] | None = None,
+) -> LoadConfig:
     return LoadConfig(
         url=url or base.url,
         users=users,
         duration=max(duration, 0.05),
         ramp_up=min(base.ramp_up, max(duration, 0.05)),
-        method=base.method,
-        headers=base.headers,
+        method=method or base.method,
+        headers=base.headers if headers is None else headers,
         body=base.body if body is None else body,
         timeout=base.timeout,
         verify_tls=base.verify_tls,
@@ -90,6 +119,120 @@ def _payload(base: LoadConfig, params: dict[str, Any]) -> bytes | None:
         return base.body
     seed = str(params.get("payload_seed", "loadtest" )).encode("utf-8") or b"x"
     return (seed * ((size // len(seed)) + 1))[:size]
+
+
+async def _resolve_udp_destination(host: str, port: int):
+    try:
+        destinations = await asyncio.get_running_loop().getaddrinfo(
+            host, port, type=socket.SOCK_DGRAM
+        )
+    except OSError as exc:
+        raise ValueError(f"no se pudo resolver el destino UDP {host!r}: {exc}") from exc
+    for family, _socktype, _protocol, _canonname, sockaddr in destinations:
+        address = ipaddress.ip_address(sockaddr[0].split("%", 1)[0])
+        if not (address.is_unspecified or address.is_multicast or address.is_reserved):
+            return address, family, sockaddr
+    raise ValueError("host no resuelve a una dirección unicast válida")
+
+
+async def _run_pps_stress(
+    base: LoadConfig,
+    params: dict[str, Any],
+    on_progress: ProgressCallback | None,
+    stop_event,
+) -> LoadReport:
+    host = str(params.get("host", "127.0.0.1")).strip()
+    if not host:
+        raise ValueError("host es obligatorio")
+    port = _positive_int(params, "port", 9000)
+    if port > 65535:
+        raise ValueError("port debe estar entre 1 y 65535")
+    pps = _positive_int(params, "pps", 100)
+    if pps > 1000:
+        raise ValueError("pps no puede superar el límite de 1000 datagramas/s")
+    packet_size = _positive_int(params, "packet_size", 512)
+    if packet_size > 1200:
+        raise ValueError("packet_size no puede superar 1200 bytes")
+    duration = base.duration
+    if duration > 60:
+        raise ValueError("PPS Stress limita cada ejecución a 60 segundos")
+        if duration <= 0:
+            raise ValueError("duration debe ser mayor que cero")
+
+    address, family, destination = await _resolve_udp_destination(host, port)
+
+    seed = str(params.get("payload_seed", "loadtest")).encode("utf-8") or b"x"
+    payload = (seed * ((packet_size // len(seed)) + 1))[:packet_size]
+    udp_socket = socket.socket(family, socket.SOCK_DGRAM)
+    udp_socket.setblocking(False)
+    started = time.perf_counter()
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + duration
+    interval = 1 / pps
+    next_send = loop.time()
+    last_progress = next_send
+    pending_count = 0
+    sent_count = 0
+    failed_count = 0
+    errors: dict[str, int] = {}
+
+    def publish_progress(now: float) -> None:
+        nonlocal pending_count, last_progress
+        if on_progress and pending_count and (now - last_progress >= 0.1 or now >= deadline):
+            on_progress(RequestResult(
+                latency_ms=0.0,
+                status=None,
+                ok=True,
+                bytes_sent=pending_count * packet_size,
+                request_count=pending_count,
+            ))
+            pending_count = 0
+            last_progress = now
+
+    try:
+        while loop.time() < deadline and not (stop_event and stop_event.is_set()):
+            now = loop.time()
+            if now < next_send:
+                await asyncio.sleep(min(next_send - now, deadline - now))
+                continue
+            try:
+                udp_socket.sendto(payload, destination)
+                sent_count += 1
+                pending_count += 1
+            except OSError as exc:
+                failed_count += 1
+                error_name = type(exc).__name__
+                errors[error_name] = errors.get(error_name, 0) + 1
+            next_send += interval
+            current = loop.time()
+            if next_send < current:
+                next_send = current + interval
+            publish_progress(current)
+    finally:
+        udp_socket.close()
+
+    finished = time.perf_counter()
+    elapsed = max(finished - started, 0.001)
+    publish_progress(loop.time())
+    total = sent_count + failed_count
+    return LoadReport(
+        url=f"udp://{address}:{port}",
+        method="UDP",
+        users=1,
+        duration_seconds=round(elapsed, 3),
+        total_requests=total,
+        successful_requests=sent_count,
+        failed_requests=failed_count,
+        requests_per_second=round(sent_count / elapsed, 2),
+        error_rate_percent=round(failed_count * 100 / total, 2) if total else 0.0,
+        latency_ms={key: None for key in ("min", "avg", "p50", "p95", "p99", "max")},
+        status_codes={},
+        errors=dict(sorted(errors.items())),
+        bytes_sent=sent_count * packet_size,
+        upload_mbps=round(sent_count * packet_size * 8 / elapsed / 1_000_000, 4),
+        packets_per_second=round(sent_count / elapsed, 2),
+        datagrams_sent=sent_count,
+    )
 
 
 def _weighted_mix(base: LoadConfig, params: dict[str, Any]) -> list[tuple[LoadConfig, int]]:
@@ -136,6 +279,10 @@ def _aggregate(reports: list[LoadReport], base: LoadConfig, scenario: str, elaps
             if value is not None:
                 latencies.append(float(value))
     elapsed = max(elapsed, 0.001)
+    bytes_sent = sum(report.bytes_sent for report in reports)
+    bytes_received = sum(report.bytes_received for report in reports)
+    datagrams_sent = sum(report.datagrams_sent for report in reports)
+    methods = {report.method for report in reports}
     latency = {
         "min": min(latencies) if latencies else None,
         "avg": sum(latencies) / len(latencies) if latencies else None,
@@ -145,13 +292,19 @@ def _aggregate(reports: list[LoadReport], base: LoadConfig, scenario: str, elaps
         "max": max(latencies) if latencies else None,
     }
     aggregate = LoadReport(
-        url=base.url, method=base.method.upper(), users=base.users,
+        url=base.url, method=next(iter(methods)) if len(methods) == 1 else base.method.upper(), users=base.users,
         duration_seconds=round(elapsed, 3), total_requests=total_requests,
         successful_requests=successful, failed_requests=total_requests - successful,
         requests_per_second=round(total_requests / elapsed, 2),
         error_rate_percent=round((total_requests - successful) * 100 / total_requests, 2) if total_requests else 0.0,
         latency_ms={key: round(value, 2) if value is not None else None for key, value in latency.items()},
         status_codes=dict(sorted(statuses.items())), errors=dict(sorted(errors.items())),
+        bytes_sent=bytes_sent,
+        bytes_received=bytes_received,
+        upload_mbps=round(bytes_sent * 8 / elapsed / 1_000_000, 4),
+        download_mbps=round(bytes_received * 8 / elapsed / 1_000_000, 4),
+        packets_per_second=round(datagrams_sent / elapsed, 2),
+        datagrams_sent=datagrams_sent,
     )
     return ScenarioReport(scenario=scenario, aggregate=aggregate, phases=[_phase_dict(report, index + 1) for index, report in enumerate(reports)])
 
@@ -219,6 +372,41 @@ async def run_scenario(
         phases = [_phase_config(base, base.users, total_duration)]
     elif mode == "Payload y rate limiting":
         phases = [_phase_config(base, base.users, total_duration, body=_payload(base, params))]
+    elif mode == "Throughput Stress":
+        method = str(params.get("method", base.method)).strip().upper()
+        if method not in {"GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"}:
+            raise ValueError("method no válido para Throughput Stress")
+        size = _positive_int(params, "payload_size", 262144)
+        if size > 16 * 1024 * 1024:
+            raise ValueError("payload_size no puede superar 16777216 bytes para Throughput Stress")
+        phases = [_phase_config(base, base.users, total_duration, body=_payload(base, {**params, "payload_size": size}), method=method)]
+    elif mode == "PPS Stress":
+        if on_phase:
+            on_phase(f"UDP · {params.get('pps', 100)} PPS solicitados", 1, 1)
+        report = await _run_pps_stress(base, params, on_progress, stop_event)
+        return ScenarioReport(scenario=mode, aggregate=report, phases=[_phase_dict(report, 1)])
+    elif mode == "Estrés de Protocolo y Red (Capa de Aplicación y Transporte)":
+        raw_methods = params.get("methods", [base.method])
+        if not isinstance(raw_methods, list) or not raw_methods:
+            raise ValueError("methods debe ser una lista no vacía de métodos HTTP")
+        allowed_methods = {"GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"}
+        methods = []
+        for method in raw_methods:
+            if not isinstance(method, str) or method.strip().upper() not in allowed_methods:
+                raise ValueError("methods solo admite GET, HEAD, POST, PUT, PATCH y DELETE")
+            methods.append(method.strip().upper())
+        connection_close = params.get("connection_close", True)
+        if not isinstance(connection_close, bool):
+            raise ValueError("connection_close debe ser booleano")
+        headers = dict(base.headers)
+        if connection_close:
+            headers = {key: value for key, value in headers.items() if key.lower() != "connection"}
+            headers["Connection"] = "close"
+        phase_duration = total_duration / len(methods)
+        phases = [
+            _phase_config(base, base.users, phase_duration, method=method, headers=headers)
+            for method in methods
+        ]
 
     reports: list[LoadReport] = []
     for index, phase in enumerate(phases, start=1):
@@ -231,6 +419,11 @@ async def run_scenario(
                 "Recuperación y fallos": ("Normal" if index != 2 else "Fallo controlado"),
                 "Prueba específica de base de datos": f"Consulta: {params.get('query_type', 'endpoint configurado')}",
                 "Payload y rate limiting": f"Payload: {len(phase.body or b'')} bytes · {params.get('rate_limit', 'sin límite explícito')}",
+                "Estrés de Protocolo y Red (Capa de Aplicación y Transporte)": (
+                    f"HTTP/1.1 {phase.method} · "
+                    f"{'cierre por solicitud' if phase.headers.get('Connection', '').lower() == 'close' else 'conexión configurada'}"
+                ),
+                "Throughput Stress": f"HTTP {phase.method} · {len(phase.body or b'')} bytes por petición",
             }
             on_phase(labels.get(mode, f"Fase {index}/{len(phases)}"), index, len(phases))
         reports.append(await run_load(phase, on_progress, stop_event))

@@ -4,7 +4,7 @@ import threading
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from loadtest.runner import LoadConfig, percentile, report_json, run_load
+from loadtest.runner import LoadConfig, default_headers_for_target, detect_target_type, percentile, report_json, run_load
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -49,12 +49,37 @@ class LoadTestTests(unittest.TestCase):
         self.assertEqual(report.failed_requests, 0)
         self.assertEqual(report.status_codes, {"200": report.total_requests})
         self.assertIsNotNone(report.latency_ms["p95"])
+        self.assertEqual(report.bytes_sent, 0)
+        self.assertEqual(report.bytes_received, 11 * report.total_requests)
+        self.assertGreater(report.download_mbps, 0)
 
     def test_report_is_valid_json(self):
         report = asyncio.run(run_load(LoadConfig(self.url, users=1, duration=0.1)))
         parsed = json.loads(report_json(report))
         self.assertEqual(parsed["method"], "GET")
         self.assertIn("latency_ms", parsed)
+
+    def test_default_headers_are_detected_from_target(self):
+        headers = default_headers_for_target("https://api.example.com/v1/users", "POST", b'{"ok": true}')
+        self.assertEqual(headers["User-Agent"], "load-test-tool")
+        self.assertEqual(headers["Accept"], "application/json")
+        self.assertEqual(headers["Content-Type"], "application/json")
+
+        custom = default_headers_for_target("http://localhost:8000/health", "GET", None)
+        self.assertEqual(custom["User-Agent"], "load-test-tool")
+        self.assertEqual(custom.get("Accept"), "application/json")
+        self.assertNotIn("Content-Type", custom)
+
+        merged = default_headers_for_target("https://api.example.com/v1/users", "POST", b'{"ok": true}', {"Authorization": "Bearer token", "Content-Type": "application/custom"})
+        self.assertEqual(merged["Authorization"], "Bearer token")
+        self.assertEqual(merged["Content-Type"], "application/custom")
+
+        graphql = default_headers_for_target("https://api.example.com/graphql", "POST", b'{"query": "{ hello }"}', target_type="GraphQL")
+        self.assertEqual(graphql["Accept"], "application/json")
+        self.assertEqual(graphql["Content-Type"], "application/json")
+
+        auto_graphql = detect_target_type("https://api.example.com/graphql", "POST", b'{"query": "{ hello }"}')
+        self.assertEqual(auto_graphql, "GraphQL")
 
     def test_invalid_configuration(self):
         with self.assertRaises(ValueError):

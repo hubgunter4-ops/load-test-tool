@@ -37,7 +37,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--insecure", action="store_true", help="no verificar certificados TLS")
     parser.add_argument("-o", "--output", type=Path, help="guardar el informe JSON en este archivo")
     parser.add_argument("--scenario", choices=SCENARIO_MODES, default="Carga estándar", help="escenario de estrés a ejecutar")
-    parser.add_argument("--scenario-params", default="{}", help="parámetros específicos del escenario como JSON")
+    parser.add_argument("--scenario-params", default="{}", help="JSON; throughput: method/payload_size, PPS: host/port/pps/packet_size")
     return parser
 
 
@@ -57,6 +57,9 @@ def _print_report(report: LoadReport) -> None:
     print(f"\nPrueba completada: {report.method} {report.url}")
     print(f"Usuarios: {report.users} | Duración: {report.duration_seconds:.2f}s | Peticiones: {report.total_requests}")
     print(f"RPS: {report.requests_per_second:.2f} | Éxito: {report.successful_requests} | Errores: {report.failed_requests} ({report.error_rate_percent:.2f}%)")
+    print(f"Payload: {report.bytes_sent} B enviados / {report.bytes_received} B recibidos | TX: {report.upload_mbps:.4f} Mbps | RX: {report.download_mbps:.4f} Mbps")
+    if report.method == "UDP":
+        print(f"Datagramas enviados: {report.datagrams_sent} | PPS: {report.packets_per_second:.2f} (envío local; entrega no confirmada)")
     latency = report.latency_ms
     print("Latencia (ms): " + " | ".join(f"{key}={value}" for key, value in latency.items()))
     print("Códigos HTTP: " + (", ".join(f"{key}: {value}" for key, value in report.status_codes.items()) or "ninguno"))

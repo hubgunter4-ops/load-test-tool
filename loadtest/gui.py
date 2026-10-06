@@ -5,6 +5,7 @@ import asyncio
 import json
 import queue
 import threading
+import time
 import tkinter as tk
 import webbrowser
 from pathlib import Path
@@ -14,7 +15,7 @@ from typing import Any
 from .charts import generate_charts
 from .gui_config import GuiValues, scenario_from_values
 from .runner import LoadReport, RequestResult
-from .scenarios import SCENARIO_MODES, ScenarioReport, run_scenario, scenario_json
+from .scenarios import SCENARIO_MODES, SCENARIO_PARAMS_EXAMPLES, ScenarioReport, run_scenario, scenario_json
 
 
 class LoadTestApp(tk.Tk):
@@ -33,6 +34,11 @@ class LoadTestApp(tk.Tk):
         self._last_report_path: Path | None = None
         self._latency_history: list[float] = []
         self._status_counts: dict[str, int] = {}
+        self._started_at = 0.0
+        self._active_scenario = SCENARIO_MODES[0]
+        self._request_count = 0
+        self._bytes_sent = 0
+        self._bytes_received = 0
         self._build_variables()
         self._build_style()
         self._build_layout()
@@ -42,11 +48,18 @@ class LoadTestApp(tk.Tk):
         self.url_var = tk.StringVar(value="http://localhost:8000/health")
         self.scenario_var = tk.StringVar(value=SCENARIO_MODES[0])
         self.method_var = tk.StringVar(value="GET")
+        self.throughput_method_var = tk.StringVar(value="POST")
+        self.throughput_payload_size_var = tk.StringVar(value="262144")
+        self.pps_host_var = tk.StringVar(value="127.0.0.1")
+        self.pps_port_var = tk.StringVar(value="9000")
+        self.pps_rate_var = tk.StringVar(value="100")
+        self.pps_packet_size_var = tk.StringVar(value="512")
         self.users_var = tk.StringVar(value="10")
         self.duration_var = tk.StringVar(value="30")
         self.ramp_var = tk.StringVar(value="0")
         self.timeout_var = tk.StringVar(value="10")
         self.tls_var = tk.BooleanVar(value=True)
+        self.target_type_var = tk.StringVar(value="Auto")
         self.report_var = tk.StringVar(value=str(Path("reports/load-report.json")))
         self.chart_dir_var = tk.StringVar(value="reports/charts")
         self.format_var = tk.StringVar(value="png")
@@ -90,11 +103,38 @@ class LoadTestApp(tk.Tk):
         ttk.Label(scenario, text="Escenario").pack(anchor="w")
         scenario_combo = ttk.Combobox(scenario, textvariable=self.scenario_var, values=SCENARIO_MODES, state="readonly")
         scenario_combo.pack(fill="x", pady=(4, 7))
-        ttk.Label(scenario, text="Parámetros específicos (JSON)").pack(anchor="w")
-        self.scenario_params_text = tk.Text(scenario, height=4, wrap="none", undo=True)
-        self.scenario_params_text.insert("1.0", '{\n  "peak_users": 100\n}')
+        scenario_combo.bind("<<ComboboxSelected>>", self._scenario_selected)
+        self.mode_fields = ttk.Frame(scenario)
+        self.mode_fields.pack(fill="x", pady=(6, 0))
+        self.throughput_fields = ttk.LabelFrame(self.mode_fields, text="Throughput HTTP", padding=6)
+        ttk.Label(self.throughput_fields, text="Método de escritura").grid(row=0, column=0, sticky="w")
+        ttk.Combobox(self.throughput_fields, textvariable=self.throughput_method_var, values=("POST", "PUT", "PATCH"), state="readonly", width=10).grid(row=1, column=0, sticky="ew", padx=(0, 8))
+        ttk.Label(self.throughput_fields, text="Payload (bytes)").grid(row=0, column=1, sticky="w")
+        ttk.Entry(self.throughput_fields, textvariable=self.throughput_payload_size_var).grid(row=1, column=1, sticky="ew")
+        self.throughput_fields.columnconfigure(1, weight=1)
+
+        self.pps_fields = ttk.LabelFrame(self.mode_fields, text="UDP saliente (solo destinos autorizados)", padding=6)
+        ttk.Label(self.pps_fields, text="Host o IP").grid(row=0, column=0, sticky="w")
+        ttk.Entry(self.pps_fields, textvariable=self.pps_host_var).grid(row=1, column=0, columnspan=3, sticky="ew", pady=(0, 5))
+        for column, (label, variable) in enumerate((
+            ("Puerto", self.pps_port_var),
+            ("PPS (máx. 1000)", self.pps_rate_var),
+            ("Bytes/datagrama (máx. 1200)", self.pps_packet_size_var),
+        )):
+            ttk.Label(self.pps_fields, text=label).grid(row=2, column=column, sticky="w")
+            ttk.Entry(self.pps_fields, textvariable=variable, width=12).grid(row=3, column=column, sticky="ew", padx=(0, 6))
+        for column in range(3):
+            self.pps_fields.columnconfigure(column, weight=1)
+
+        self.scenario_params_frame = ttk.Frame(scenario)
+        self.scenario_params_frame.pack(fill="x", pady=(6, 0))
+        ttk.Label(self.scenario_params_frame, text="Parámetros adicionales (JSON)").pack(anchor="w")
+        self.scenario_params_text = tk.Text(self.scenario_params_frame, height=4, wrap="none", undo=True)
+        self.scenario_params_text.insert("1.0", SCENARIO_PARAMS_EXAMPLES[SCENARIO_MODES[0]])
         self.scenario_params_text.pack(fill="x", pady=(4, 0))
-        ttk.Label(scenario, text="Ej.: peak_users, stages, mix, failure_url, payload_size", foreground="#64748b").pack(anchor="w", pady=(4, 0))
+        self.scenario_help = ttk.Label(scenario, text="", foreground="#64748b", wraplength=480, justify="left")
+        self.scenario_help.pack(anchor="w", pady=(4, 0))
+        self._scenario_selected(None)
 
         endpoint = ttk.LabelFrame(parent, text="1. Endpoint y concurrencia", style="Section.TLabelframe", padding=10)
         endpoint.pack(fill="x", pady=(0, 10))
@@ -111,6 +151,9 @@ class LoadTestApp(tk.Tk):
 
         request = ttk.LabelFrame(parent, text="2. Petición", style="Section.TLabelframe", padding=10)
         request.pack(fill="both", expand=True, pady=(0, 10))
+        ttk.Label(request, text="Tipo de target").pack(anchor="w")
+        ttk.Combobox(request, textvariable=self.target_type_var, values=("Auto", "REST API", "GraphQL", "Health Check", "Upload"), state="readonly", width=18).pack(anchor="w", pady=(4, 8))
+        self.target_type_var.trace_add("write", lambda *_: self._apply_target_preset())
         ttk.Label(request, text="Cabeceras (una por línea: Nombre: valor)").pack(anchor="w")
         self.headers_text = tk.Text(request, height=5, wrap="none", undo=True)
         self.headers_text.pack(fill="x", pady=(4, 8))
@@ -179,6 +222,27 @@ class LoadTestApp(tk.Tk):
         parent.columnconfigure(0, weight=1)
         parent.columnconfigure(1, weight=1)
 
+    def _scenario_selected(self, _event: Any) -> None:
+        scenario = self.scenario_var.get()
+        example = SCENARIO_PARAMS_EXAMPLES[scenario]
+        self.scenario_params_text.delete("1.0", "end")
+        self.scenario_params_text.insert("1.0", example)
+        self.throughput_fields.pack_forget()
+        self.pps_fields.pack_forget()
+        if scenario == "Throughput Stress":
+            self.throughput_fields.pack(fill="x")
+            self.scenario_params_frame.pack_forget()
+        elif scenario == "PPS Stress":
+            self.pps_fields.pack(fill="x")
+            self.scenario_params_frame.pack_forget()
+        else:
+            self.scenario_params_frame.pack(fill="x", pady=(6, 0))
+        notes = {
+            "Throughput Stress": "Mbps mide bytes del payload HTTP; usa POST/PUT para estresar subida.",
+            "PPS Stress": "UDP admite destinos salientes autorizados. Máximo 1.000 PPS, 1.200 bytes y 60 s.",
+        }
+        self.scenario_help.configure(text=notes.get(scenario, "Ej.: peak_users, stages, mix, payload_size, methods, connection_close"))
+
     def _choose_report(self) -> None:
         path = filedialog.asksaveasfilename(title="Guardar informe JSON", defaultextension=".json", filetypes=(("JSON", "*.json"), ("Todos", "*.*")))
         if path:
@@ -189,14 +253,32 @@ class LoadTestApp(tk.Tk):
         if path:
             self.chart_dir_var.set(path)
 
+    def _apply_target_preset(self) -> None:
+        if self.headers_text.get("1.0", "end-1c").strip():
+            return
+        target = self.target_type_var.get()
+        if target == "Auto":
+            return
+        from .runner import target_header_preset
+        preset = target_header_preset(target)
+        lines = [f"{key}: {value}" for key, value in preset.items()]
+        self.headers_text.delete("1.0", "end")
+        if lines:
+            self.headers_text.insert("1.0", "\n".join(lines))
+
     def _values(self) -> GuiValues:
         return GuiValues(
             url=self.url_var.get(), method=self.method_var.get(), users=self.users_var.get(),
             duration=self.duration_var.get(), ramp_up=self.ramp_var.get(), timeout=self.timeout_var.get(),
             headers=self.headers_text.get("1.0", "end"), body=self.body_text.get("1.0", "end-1c"),
-            verify_tls=self.tls_var.get(), report_path=self.report_var.get(), chart_dir=self.chart_dir_var.get(),
+            target_type=self.target_type_var.get(), verify_tls=self.tls_var.get(),
+            report_path=self.report_var.get(), chart_dir=self.chart_dir_var.get(),
             chart_format=self.format_var.get(), auto_charts=self.auto_charts_var.get(),
             scenario=self.scenario_var.get(), scenario_params=self.scenario_params_text.get("1.0", "end-1c"),
+            throughput_method=self.throughput_method_var.get(),
+            throughput_payload_size=self.throughput_payload_size_var.get(),
+            pps_host=self.pps_host_var.get(), pps_port=self.pps_port_var.get(),
+            pps_rate=self.pps_rate_var.get(), pps_packet_size=self.pps_packet_size_var.get(),
         )
 
     def _start(self) -> None:
@@ -216,6 +298,11 @@ class LoadTestApp(tk.Tk):
         self._last_report = None
         self._latency_history.clear()
         self._status_counts.clear()
+        self._started_at = time.perf_counter()
+        self._active_scenario = self.scenario_var.get()
+        self._request_count = 0
+        self._bytes_sent = 0
+        self._bytes_received = 0
         self.progress_var.set(0)
         self.request_var.set("Solicitudes: 0")
         self.rps_var.set("RPS: —")
@@ -268,16 +355,37 @@ class LoadTestApp(tk.Tk):
         self._append_log(f"Fase {index}/{total}: {name}")
 
     def _update_progress(self, result: RequestResult) -> None:
-        current = int(self.request_var.get().split(":", 1)[1].strip()) + 1
-        self._latency_history.append(result.latency_ms)
-        self._latency_history = self._latency_history[-120:]
-        status = str(result.status) if result.status is not None else "ERROR"
-        self._status_counts[status] = self._status_counts.get(status, 0) + 1
+        self._request_count += result.request_count
+        current = self._request_count
+        self._bytes_sent += result.bytes_sent
+        self._bytes_received += result.bytes_received
+        if self._active_scenario != "PPS Stress":
+            self._latency_history.append(result.latency_ms)
+            self._latency_history = self._latency_history[-120:]
+            status = str(result.status) if result.status is not None else "ERROR"
+            self._status_counts[status] = self._status_counts.get(status, 0) + 1
+        else:
+            self._status_counts["UDP"] = self._status_counts.get("UDP", 0) + result.request_count
+        elapsed = max(time.perf_counter() - self._started_at, 0.001)
         self.request_var.set(f"Solicitudes: {current}")
-        self.error_var.set(f"Errores: {1 if not result.ok else 0} en la última")
-        self.latency_var.set(f"Última latencia: {result.latency_ms:.1f} ms")
+        if self._active_scenario == "PPS Stress":
+            self.request_var.set(f"Datagramas enviados: {current}")
+            self.rps_var.set(f"PPS: {current / elapsed:.1f}")
+            self.latency_var.set(f"TX: {self._bytes_sent * 8 / elapsed / 1_000_000:.4f} Mbps")
+            self._append_log(f"UDP: +{result.request_count} datagramas enviados")
+        elif self._active_scenario == "Throughput Stress":
+            self.rps_var.set(f"RPS: {current / elapsed:.1f}")
+            self.latency_var.set(
+                f"TX: {self._bytes_sent * 8 / elapsed / 1_000_000:.4f} Mbps · "
+                f"RX: {self._bytes_received * 8 / elapsed / 1_000_000:.4f} Mbps"
+            )
+            self._append_log(f"HTTP {result.status} · {result.bytes_sent} B TX / {result.bytes_received} B RX")
+        else:
+            self.rps_var.set(f"RPS: {current / elapsed:.1f}")
+            self.error_var.set(f"Errores: {1 if not result.ok else 0} en la última")
+            self.latency_var.set(f"Última latencia: {result.latency_ms:.1f} ms")
+            self._append_log(f"HTTP {result.status or 'ERROR'} · {result.latency_ms:.1f} ms")
         self._draw_dashboard()
-        self._append_log(f"HTTP {result.status or 'ERROR'} · {result.latency_ms:.1f} ms")
 
     def _draw_dashboard(self) -> None:
         """Dibuja el dashboard sin dependencias externas y desde el hilo de Tk."""
@@ -317,7 +425,7 @@ class LoadTestApp(tk.Tk):
             for index, (status, count) in enumerate(sorted(statuses.items())):
                 y = right_y + index * (bar_h + bar_gap)
                 bar_w = (count / maximum) * max(right_w - 64, 1)
-                color = "#16a34a" if status[:1] in {"2", "3"} else "#dc2626"
+                color = "#16a34a" if status[:1] in {"2", "3"} else "#f59e0b" if status == "UDP" else "#dc2626"
                 canvas.create_text(right_x, y + bar_h / 2, anchor="w", text=status, fill="#475569", font=("TkDefaultFont", 9))
                 canvas.create_rectangle(right_x + 42, y, right_x + 42 + bar_w, y + bar_h, fill=color, outline="")
                 canvas.create_text(right_x + 48 + bar_w, y + bar_h / 2, anchor="w", text=str(count), fill="#475569", font=("TkDefaultFont", 9))
@@ -335,9 +443,19 @@ class LoadTestApp(tk.Tk):
         self.status_var.set("Prueba detenida" if self._stop_event and self._stop_event.is_set() else "Prueba completada")
         self.phase_var.set(f"Escenario: {scenario_report.scenario} · {len(scenario_report.phases)} fase(s)")
         self.progress_var.set(100)
-        self.rps_var.set(f"RPS: {report.requests_per_second:.2f}")
+        self.request_var.set(
+            f"Datagramas enviados: {report.datagrams_sent}"
+            if self._active_scenario == "PPS Stress" else f"Solicitudes: {report.total_requests}"
+        )
+        self.rps_var.set(
+            f"PPS: {report.packets_per_second:.2f}"
+            if self._active_scenario == "PPS Stress" else f"RPS: {report.requests_per_second:.2f}"
+        )
         self.error_var.set(f"Errores: {report.failed_requests} ({report.error_rate_percent:.2f}%)")
-        self.latency_var.set(f"Latencia p95: {report.latency_ms['p95']} ms")
+        self.latency_var.set(
+            f"TX: {report.upload_mbps:.4f} Mbps" if self._active_scenario == "PPS Stress" else
+            f"TX: {report.upload_mbps:.4f} Mbps · RX: {report.download_mbps:.4f} Mbps · p95: {report.latency_ms['p95']} ms"
+        )
         self._set_text(self.report_text, json.dumps(scenario_report.to_dict(), indent=2, ensure_ascii=False))
         self._append_log(f"Informe guardado en {report_path}")
         if values.auto_charts:
