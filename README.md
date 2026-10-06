@@ -1,6 +1,6 @@
 # Load Test Tool
 
-Herramienta de terminal interactiva para **pruebas de carga HTTP concurrentes** y visualización de resultados, pensada para estresar endpoints de aplicaciones que consultan una base de datos y observar capacidad, errores y latencia.
+wHerramienta de terminal interactiva para **pruebas de carga HTTP concurrentes** y visualización de resultados, pensada para estresar endpoints de aplicaciones que consultan una base de datos y observar capacidad, errores y latencia.
 
 > Úsalo únicamente contra sistemas propios o para los que tengas autorización. Empieza en staging y aumenta la carga gradualmente.
 
