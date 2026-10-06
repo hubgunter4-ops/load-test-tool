@@ -193,3 +193,39 @@ python3 -m unittest discover -v
 ## Estado del repositorio
 
 Versión `0.4.0`, con siete escenarios de estrés, interfaz Tkinter, dashboard en vivo, exportación JSON y gráficos PNG/SVG.
+
+## Acerca de
+
+No se proporciona descripción, sitio web ni temas.
+
+### Recursos
+
+[Léame](https://github.com/hubgunter4-ops/load-test-tool#readme-ov-file)
+
+[Licencia MIT](https://github.com/hubgunter4-ops/load-test-tool#MIT-1-ov-file)
+
+[Actividad](https://github.com/hubgunter4-ops/load-test-tool/activity)
+
+### Estrellas
+
+[**0** estrellas](https://github.com/hubgunter4-ops/load-test-tool/stargazers)
+
+### Vigilantes
+
+[**0** espectadores](https://github.com/hubgunter4-ops/load-test-tool/watchers)
+
+### Horquillas
+
+[**0** tenedores](https://github.com/hubgunter4-ops/load-test-tool/forks)
+
+## [Lanzamientos](https://github.com/hubgunter4-ops/load-test-tool/releases)
+
+No se han publicado comunicados
+
+[Crear una nueva versión](https://github.com/hubgunter4-ops/load-test-tool/releases/new)
+
+## [Paquetes](https://github.com/users/hubgunter4-ops/packages?repo_name=load-test-tool)
+
+No hay paquetes publicados.
+
+[Publica tu primer paquete.](https://github.com/hubgunter4-ops/load-test-tool/packages)
