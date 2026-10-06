@@ -43,10 +43,22 @@ class ExternalToolsTests(unittest.TestCase):
     def test_pktgen_generates_script_without_sending(self):
         config = ExternalConfig("pktgen", "198.18.0.2", interface="lo", destination="127.0.0.1", count=100)
         script = build_pktgen_script(config)
-        self.assertIn("add_device lo", script)
-        self.assertIn("count 100", script)
-        self.assertIn("ratep 100", script)
-        self.assertIn("dst_min 127.0.0.1", script)
+        self.assertIn("INTERFACE=lo", script)
+        self.assertIn('add_device %s\\n', script)
+        self.assertIn('count %s\\n', script)
+        self.assertIn('"100"', script)
+        self.assertIn('ratep %s\\n', script)
+        self.assertIn('dst_min %s\\n', script)
+
+    def test_pktgen_rejects_shell_metacharacters(self):
+        config = ExternalConfig("pktgen", "127.0.0.1", interface="eth0; touch /tmp/pwned")
+        with self.assertRaises(ExternalToolError):
+            build_pktgen_script(config)
+
+    def test_pktgen_rejects_non_ip_destination(self):
+        config = ExternalConfig("pktgen", "not-an-ip", interface="eth0")
+        with self.assertRaises(ExternalToolError):
+            build_pktgen_script(config)
 
     def test_plan_is_json_serializable_and_does_not_execute(self):
         config = ExternalConfig("wrk", "https://example.test")

@@ -7,7 +7,9 @@ carga accidentalmente contra destinos no autorizados.
 from __future__ import annotations
 
 import json
+import ipaddress
 import os
+import re
 import shlex
 import shutil
 import subprocess
@@ -53,15 +55,16 @@ def tool_path(tool: str) -> str | None:
 
 def tool_status() -> list[dict[str, Any]]:
     """Lista disponibilidad local sin instalar ni ejecutar herramientas."""
-    return [
-        {
+    status = []
+    for tool in TOOL_NAMES:
+        path = tool_path(tool)
+        status.append({
             "tool": tool,
-            "available": tool_path(tool) is not None,
-            "path": tool_path(tool),
+            "available": path is not None,
+            "path": path,
             "mode": "kernel/procfs" if tool == "pktgen" else "executable",
-        }
-        for tool in TOOL_NAMES
-    ]
+        })
+    return status
 
 
 def _positive(name: str, value: int, maximum: int) -> int:
@@ -87,6 +90,14 @@ def validate_config(config: ExternalConfig) -> None:
         raise ExternalToolError("protocol debe ser tcp o udp")
     if config.tool == "pktgen" and not config.interface:
         raise ExternalToolError("pktgen requiere --interface")
+    if config.tool == "pktgen":
+        if not re.fullmatch(r"[A-Za-z0-9_.:-]+", config.interface):
+            raise ExternalToolError("interface de Pktgen contiene caracteres no permitidos")
+        destination = config.destination or config.target
+        try:
+            ipaddress.ip_address(destination)
+        except ValueError as exc:
+            raise ExternalToolError("Pktgen requiere un destino IPv4 o IPv6 válido") from exc
     if config.tool == "slowhttptest" and not config.target.startswith(("http://", "https://")):
         raise ExternalToolError("slowhttptest requiere una URL HTTP o HTTPS")
 
@@ -131,20 +142,21 @@ def build_pktgen_script(config: ExternalConfig) -> str:
     """Genera un script de configuración de Linux kernel pktgen sin ejecutarlo."""
     validate_config(config)
     destination = config.destination or config.target
-    proc_device = f"/proc/net/pktgen/{config.interface}"
     lines = [
         "#!/usr/bin/env bash",
         "set -euo pipefail",
         "# Generado por load-test-tool; ejecutar solo en un laboratorio autorizado.",
-        f'PGDEV={shlex.quote(proc_device)}',
+        f"INTERFACE={shlex.quote(config.interface)}",
+        f"DESTINATION={shlex.quote(destination)}",
+        'PGDEV="/proc/net/pktgen/${INTERFACE}"',
         'echo "Configurando $PGDEV"',
         'echo reset > /proc/net/pktgen/pgctrl',
-        f'echo "add_device {config.interface}" > /proc/net/pktgen/kpktgend_0',
-        f'echo "count {config.count}" > "$PGDEV"',
-        f'echo "pkt_size {config.packet_size}" > "$PGDEV"',
-        f'echo "ratep {config.rate}" > "$PGDEV"',
-        f'echo "dst_min {shlex.quote(destination)}" > "$PGDEV"',
-        f'echo "udp_dst_min {config.port}" > "$PGDEV"',
+        'printf "add_device %s\\n" "$INTERFACE" > /proc/net/pktgen/kpktgend_0',
+        f'printf "count %s\\n" "{config.count}" > "$PGDEV"',
+        f'printf "pkt_size %s\\n" "{config.packet_size}" > "$PGDEV"',
+        f'printf "ratep %s\\n" "{config.rate}" > "$PGDEV"',
+        'printf "dst_min %s\\n" "$DESTINATION" > "$PGDEV"',
+        f'printf "udp_dst_min %s\\n" "{config.port}" > "$PGDEV"',
         'echo start > /proc/net/pktgen/pgctrl',
         'cat "$PGDEV"',
     ]
@@ -175,7 +187,10 @@ def execute(config: ExternalConfig, *, authorized: bool = False) -> subprocess.C
         output.write_text(result["script"], encoding="utf-8")
         output.chmod(0o750)
         return output
-    return subprocess.run(result["command"], check=False, text=True, capture_output=True, timeout=config.duration + 60)
+    try:
+        return subprocess.run(result["command"], check=False, text=True, capture_output=True, timeout=config.duration + 60)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise ExternalToolError(f"{config.tool} no pudo ejecutarse o superó el timeout") from exc
 
 
 def plan_json(config: ExternalConfig) -> str:
