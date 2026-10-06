@@ -18,6 +18,14 @@ from pathlib import Path
 from typing import Any
 
 TOOL_NAMES = ("wrk", "wrk2", "pktgen", "slowhttptest", "iperf3")
+EXECUTION_ENGINES = ("Integrado", "Wrk", "Wrk2", "Pktgen", "SlowHTTPTest", "iPerf3")
+ENGINE_TO_TOOL = {
+    "Wrk": "wrk",
+    "Wrk2": "wrk2",
+    "Pktgen": "pktgen",
+    "SlowHTTPTest": "slowhttptest",
+    "iPerf3": "iperf3",
+}
 
 
 @dataclass(frozen=True)

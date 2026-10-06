@@ -13,7 +13,8 @@ from tkinter import filedialog, messagebox, ttk
 from typing import Any
 
 from .charts import generate_charts
-from .gui_config import GuiValues, scenario_from_values
+from .external_tools import EXECUTION_ENGINES, plan
+from .gui_config import GuiValues, external_config_from_values, scenario_from_values
 from .runner import LoadReport, RequestResult
 from .scenarios import SCENARIO_MODES, SCENARIO_PARAMS_EXAMPLES, ScenarioReport, run_scenario, scenario_json
 
@@ -47,6 +48,7 @@ class LoadTestApp(tk.Tk):
     def _build_variables(self) -> None:
         self.url_var = tk.StringVar(value="http://localhost:8000/health")
         self.scenario_var = tk.StringVar(value=SCENARIO_MODES[0])
+        self.execution_engine_var = tk.StringVar(value="Integrado")
         self.method_var = tk.StringVar(value="GET")
         self.throughput_method_var = tk.StringVar(value="POST")
         self.throughput_payload_size_var = tk.StringVar(value="262144")
@@ -54,6 +56,12 @@ class LoadTestApp(tk.Tk):
         self.pps_port_var = tk.StringVar(value="9000")
         self.pps_rate_var = tk.StringVar(value="100")
         self.pps_packet_size_var = tk.StringVar(value="512")
+        self.external_threads_var = tk.StringVar(value="2")
+        self.external_rate_var = tk.StringVar(value="100")
+        self.external_interface_var = tk.StringVar(value="")
+        self.external_destination_var = tk.StringVar(value="")
+        self.external_protocol_var = tk.StringVar(value="tcp")
+        self.external_count_var = tk.StringVar(value="1000")
         self.users_var = tk.StringVar(value="10")
         self.duration_var = tk.StringVar(value="30")
         self.ramp_var = tk.StringVar(value="0")
@@ -101,6 +109,10 @@ class LoadTestApp(tk.Tk):
         scenario = ttk.LabelFrame(parent, text="0. Tipo de prueba", style="Section.TLabelframe", padding=10)
         scenario.pack(fill="x", pady=(0, 10))
         ttk.Label(scenario, text="Escenario").pack(anchor="w")
+        ttk.Label(scenario, text="Motor de ejecución").pack(anchor="w")
+        engine_combo = ttk.Combobox(scenario, textvariable=self.execution_engine_var, values=EXECUTION_ENGINES, state="readonly")
+        engine_combo.pack(fill="x", pady=(4, 7))
+        engine_combo.bind("<<ComboboxSelected>>", self._engine_selected)
         scenario_combo = ttk.Combobox(scenario, textvariable=self.scenario_var, values=SCENARIO_MODES, state="readonly")
         scenario_combo.pack(fill="x", pady=(4, 7))
         scenario_combo.bind("<<ComboboxSelected>>", self._scenario_selected)
@@ -126,6 +138,22 @@ class LoadTestApp(tk.Tk):
         for column in range(3):
             self.pps_fields.columnconfigure(column, weight=1)
 
+        self.external_fields = ttk.LabelFrame(self.mode_fields, text="Motor externo (modo plan por defecto)", padding=6)
+        ttk.Label(self.external_fields, text="Hilos").grid(row=0, column=0, sticky="w")
+        ttk.Entry(self.external_fields, textvariable=self.external_threads_var, width=10).grid(row=1, column=0, sticky="ew", padx=(0, 6))
+        ttk.Label(self.external_fields, text="Tasa RPS/PPS/Kbit/s").grid(row=0, column=1, sticky="w")
+        ttk.Entry(self.external_fields, textvariable=self.external_rate_var, width=14).grid(row=1, column=1, sticky="ew", padx=(0, 6))
+        ttk.Label(self.external_fields, text="Interfaz Pktgen").grid(row=0, column=2, sticky="w")
+        ttk.Entry(self.external_fields, textvariable=self.external_interface_var, width=12).grid(row=1, column=2, sticky="ew", padx=(0, 6))
+        ttk.Label(self.external_fields, text="Destino Pktgen").grid(row=2, column=0, sticky="w")
+        ttk.Entry(self.external_fields, textvariable=self.external_destination_var, width=18).grid(row=3, column=0, columnspan=2, sticky="ew", padx=(0, 6))
+        ttk.Label(self.external_fields, text="Protocolo").grid(row=2, column=2, sticky="w")
+        ttk.Combobox(self.external_fields, textvariable=self.external_protocol_var, values=("tcp", "udp"), state="readonly", width=8).grid(row=3, column=2, sticky="w")
+        ttk.Label(self.external_fields, text="Paquetes Pktgen").grid(row=4, column=0, sticky="w")
+        ttk.Entry(self.external_fields, textvariable=self.external_count_var, width=14).grid(row=5, column=0, sticky="ew")
+        for column in range(3):
+            self.external_fields.columnconfigure(column, weight=1)
+
         self.scenario_params_frame = ttk.Frame(scenario)
         self.scenario_params_frame.pack(fill="x", pady=(6, 0))
         ttk.Label(self.scenario_params_frame, text="Parámetros adicionales (JSON)").pack(anchor="w")
@@ -135,6 +163,7 @@ class LoadTestApp(tk.Tk):
         self.scenario_help = ttk.Label(scenario, text="", foreground="#64748b", wraplength=480, justify="left")
         self.scenario_help.pack(anchor="w", pady=(4, 0))
         self._scenario_selected(None)
+        self._engine_selected(None)
 
         endpoint = ttk.LabelFrame(parent, text="1. Endpoint y concurrencia", style="Section.TLabelframe", padding=10)
         endpoint.pack(fill="x", pady=(0, 10))
@@ -178,6 +207,12 @@ class LoadTestApp(tk.Tk):
         self.stop_button.pack(side="left", padx=(8, 0))
         self.chart_button = ttk.Button(controls, text="Generar gráficos desde JSON", command=self._generate_from_json)
         self.chart_button.pack(side="right")
+
+    def _engine_selected(self, _event: Any) -> None:
+        if self.execution_engine_var.get() == "Integrado":
+            self.external_fields.pack_forget()
+        else:
+            self.external_fields.pack(fill="x", pady=(6, 0))
 
     def _build_results_panel(self, parent: ttk.Frame) -> None:
         status = ttk.LabelFrame(parent, text="Ejecución", style="Section.TLabelframe", padding=10)
@@ -279,13 +314,32 @@ class LoadTestApp(tk.Tk):
             throughput_payload_size=self.throughput_payload_size_var.get(),
             pps_host=self.pps_host_var.get(), pps_port=self.pps_port_var.get(),
             pps_rate=self.pps_rate_var.get(), pps_packet_size=self.pps_packet_size_var.get(),
+            execution_engine=self.execution_engine_var.get(), external_threads=self.external_threads_var.get(),
+            external_rate=self.external_rate_var.get(), external_interface=self.external_interface_var.get(),
+            external_destination=self.external_destination_var.get(), external_protocol=self.external_protocol_var.get(),
+            external_count=self.external_count_var.get(),
         )
 
     def _start(self) -> None:
         if self._worker and self._worker.is_alive():
             return
+        values = self._values()
+        if values.execution_engine != "Integrado":
+            try:
+                external = external_config_from_values(values)
+                result = plan(external)
+                report_path = Path(values.report_path).expanduser()
+                report_path.parent.mkdir(parents=True, exist_ok=True)
+                report_path.write_text(json.dumps(result, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+                self._set_text(self.report_text, json.dumps(result, indent=2, ensure_ascii=False))
+                self.status_var.set("Plan externo generado; no se ejecutó tráfico")
+                self.phase_var.set(f"Motor seleccionado: {values.execution_engine}")
+                self._append_log(f"Plan externo guardado en {report_path}")
+            except (ValueError, OSError) as exc:
+                messagebox.showerror("Configuración del motor externo", str(exc))
+            return
         try:
-            config = scenario_from_values(self._values())
+            config = scenario_from_values(values)
         except ValueError as exc:
             messagebox.showerror("Configuración inválida", str(exc))
             return

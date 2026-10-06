@@ -24,6 +24,8 @@ SCENARIO_MODES = (
     "Estrés de Protocolo y Red (Capa de Aplicación y Transporte)",
     "Throughput Stress",
     "PPS Stress",
+    "Pruebas de Conmutación por Error (Failover)",
+    "Estrés de Auto-escalado",
 )
 
 SCENARIO_PARAMS_EXAMPLES = {
@@ -38,6 +40,8 @@ SCENARIO_PARAMS_EXAMPLES = {
     "Estrés de Protocolo y Red (Capa de Aplicación y Transporte)": '{\n  "methods": ["GET", "HEAD"],\n  "connection_close": true\n}',
     "Throughput Stress": '{\n  "method": "POST",\n  "payload_size": 262144\n}',
     "PPS Stress": '{\n  "host": "127.0.0.1",\n  "port": 9000,\n  "pps": 100,\n  "packet_size": 512\n}',
+    "Pruebas de Conmutación por Error (Failover)": '{\n  "primary_url": "http://localhost:8000/health",\n  "fallback_url": "http://127.0.0.1:1/fallback",\n  "switch_after": 15\n}',
+    "Estrés de Auto-escalado": '{\n  "min_users": 10,\n  "max_users": 100,\n  "steps": 4\n}',
 }
 
 ProgressCallback = Callable[[RequestResult], None]
@@ -385,6 +389,32 @@ async def run_scenario(
             on_phase(f"UDP · {params.get('pps', 100)} PPS solicitados", 1, 1)
         report = await _run_pps_stress(base, params, on_progress, stop_event)
         return ScenarioReport(scenario=mode, aggregate=report, phases=[_phase_dict(report, 1)])
+    elif mode == "Pruebas de Conmutación por Error (Failover)":
+        primary_url = str(params.get("primary_url", base.url)).strip()
+        fallback_url = str(params.get("fallback_url", "http://127.0.0.1:1/fallback")).strip()
+        for label, value in (("primary_url", primary_url), ("fallback_url", fallback_url)):
+            parsed = urlparse(value)
+            if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+                raise ValueError(f"{label} debe ser una URL HTTP o HTTPS válida")
+        switch_after = _number(params, "switch_after", total_duration / 2)
+        if switch_after <= 0 or switch_after >= total_duration:
+            raise ValueError("switch_after debe estar entre 0 y la duración total")
+        phases = [
+            _phase_config(base, base.users, switch_after, url=primary_url),
+            _phase_config(base, base.users, total_duration - switch_after, url=fallback_url),
+        ]
+    elif mode == "Estrés de Auto-escalado":
+        minimum = _positive_int(params, "min_users", base.users)
+        maximum = _positive_int(params, "max_users", max(base.users * 4, minimum))
+        steps = _positive_int(params, "steps", 4)
+        if maximum < minimum:
+            raise ValueError("max_users debe ser mayor o igual que min_users")
+        if steps < 2 or steps > 12:
+            raise ValueError("steps debe estar entre 2 y 12")
+        ascending = [round(minimum + (maximum - minimum) * index / (steps - 1)) for index in range(steps)]
+        stage_users = ascending + ascending[-2::-1]
+        each = total_duration / len(stage_users)
+        phases = [_phase_config(base, users, each) for users in stage_users]
     elif mode == "Estrés de Protocolo y Red (Capa de Aplicación y Transporte)":
         raw_methods = params.get("methods", [base.method])
         if not isinstance(raw_methods, list) or not raw_methods:
@@ -424,6 +454,10 @@ async def run_scenario(
                     f"{'cierre por solicitud' if phase.headers.get('Connection', '').lower() == 'close' else 'conexión configurada'}"
                 ),
                 "Throughput Stress": f"HTTP {phase.method} · {len(phase.body or b'')} bytes por petición",
+                "Pruebas de Conmutación por Error (Failover)": (
+                    "Primario · tráfico normal" if index == 1 else "Fallback · conmutación programada"
+                ),
+                "Estrés de Auto-escalado": f"Nivel {index}/{len(phases)} · {phase.users} usuarios",
             }
             on_phase(labels.get(mode, f"Fase {index}/{len(phases)}"), index, len(phases))
         reports.append(await run_load(phase, on_progress, stop_event))

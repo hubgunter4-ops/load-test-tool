@@ -1,6 +1,6 @@
 import unittest
 
-from loadtest.gui_config import GuiValues, config_from_values, parse_headers_text, scenario_from_values
+from loadtest.gui_config import GuiValues, config_from_values, external_config_from_values, parse_headers_text, scenario_from_values
 
 
 class GuiHelpersTests(unittest.TestCase):
@@ -92,6 +92,28 @@ class GuiHelpersTests(unittest.TestCase):
         )
         with self.assertRaisesRegex(ValueError, "16777216"):
             scenario_from_values(throughput)
+
+    def test_external_engine_selection_builds_plan_config(self):
+        values = GuiValues(
+            "https://example.test/health", "GET", "20", "10", "0", "5", "Accept: application/json", "", True,
+            "report.json", "charts", "png", False, execution_engine="Wrk2", external_threads="4", external_rate="250",
+        )
+        config = external_config_from_values(values)
+        self.assertEqual(config.tool, "wrk2")
+        self.assertEqual(config.connections, 20)
+        self.assertEqual(config.threads, 4)
+        self.assertEqual(config.rate, 250)
+        self.assertIn("Accept: application/json", config.headers)
+
+    def test_pktgen_engine_requires_safe_interface_and_ip_destination(self):
+        values = GuiValues(
+            "127.0.0.1", "GET", "2", "1", "0", "1", "", "", True,
+            "report.json", "charts", "png", False, execution_engine="Pktgen", external_interface="eth0",
+            external_destination="198.18.0.2",
+        )
+        config = external_config_from_values(values)
+        self.assertEqual(config.tool, "pktgen")
+        self.assertEqual(config.destination, "198.18.0.2")
 
 
 if __name__ == "__main__":

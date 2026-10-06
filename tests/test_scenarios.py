@@ -67,7 +67,26 @@ class ScenarioTests(unittest.TestCase):
                 report = asyncio.run(run_scenario(ScenarioConfig(self.base(), mode, params)))
                 self.assertEqual(report.scenario, mode)
                 self.assertGreaterEqual(len(report.phases), 1)
-                self.assertGreaterEqual(report.aggregate.total_requests, 0)
+            self.assertGreaterEqual(report.aggregate.total_requests, 0)
+
+    def test_failover_switches_from_primary_to_fallback(self):
+        report = asyncio.run(run_scenario(ScenarioConfig(
+            self.base(duration=0.2, users=1),
+            "Pruebas de Conmutación por Error (Failover)",
+            {"primary_url": self.url, "fallback_url": "http://127.0.0.1:1/fallback", "switch_after": 0.1},
+        )))
+        self.assertEqual(len(report.phases), 2)
+        self.assertEqual(report.phases[0]["url"], self.url)
+        self.assertEqual(report.phases[1]["url"], "http://127.0.0.1:1/fallback")
+        self.assertGreater(report.aggregate.failed_requests, 0)
+
+    def test_auto_scaling_ramps_up_and_down(self):
+        report = asyncio.run(run_scenario(ScenarioConfig(
+            self.base(duration=0.2, users=1),
+            "Estrés de Auto-escalado",
+            {"min_users": 1, "max_users": 4, "steps": 3},
+        )))
+        self.assertEqual([phase["users"] for phase in report.phases], [1, 2, 4, 2, 1])
 
     def test_recovery_records_controlled_failures(self):
         report = asyncio.run(run_scenario(ScenarioConfig(self.base(duration=0.2), "Recuperación y fallos", {})))

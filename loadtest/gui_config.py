@@ -6,6 +6,7 @@ import json
 
 from .runner import LoadConfig
 from .scenarios import ScenarioConfig
+from .external_tools import ENGINE_TO_TOOL, EXECUTION_ENGINES, ExternalConfig
 
 
 @dataclass(frozen=True)
@@ -32,6 +33,13 @@ class GuiValues:
     pps_port: str = "9000"
     pps_rate: str = "100"
     pps_packet_size: str = "512"
+    execution_engine: str = "Integrado"
+    external_threads: str = "2"
+    external_rate: str = "100"
+    external_interface: str = ""
+    external_destination: str = ""
+    external_protocol: str = "tcp"
+    external_count: str = "1000"
 
 
 def parse_headers_text(value: str) -> dict[str, str]:
@@ -109,6 +117,43 @@ def scenario_from_values(values: GuiValues) -> ScenarioConfig:
             packet_size=_positive_integer(values.pps_packet_size, "Tamaño del datagrama", 1200),
         )
     return ScenarioConfig(base=config_from_values(values), mode=values.scenario, params=params)
+
+
+def external_config_from_values(values: GuiValues) -> ExternalConfig:
+    """Convierte el motor seleccionado en una configuración externa planificable."""
+    if values.execution_engine == "Integrado":
+        raise ValueError("Selecciona un motor externo para crear un plan")
+    if values.execution_engine not in EXECUTION_ENGINES:
+        raise ValueError(f"Motor no soportado: {values.execution_engine}")
+    base = config_from_values(values)
+    tool = ENGINE_TO_TOOL[values.execution_engine]
+    try:
+        duration = max(1, int(round(base.duration)))
+    except (TypeError, ValueError) as exc:
+        raise ValueError("La duración del motor externo debe ser numérica") from exc
+    headers = tuple(f"{key}: {value}" for key, value in base.headers.items())
+    target = base.url
+    destination = values.external_destination.strip()
+    if tool == "pktgen":
+        target = destination or values.pps_host.strip()
+        destination = destination or target
+    return ExternalConfig(
+        tool=tool,
+        target=target,
+        connections=base.users,
+        duration=duration,
+        threads=_positive_integer(values.external_threads, "Hilos", 32),
+        rate=_positive_integer(values.external_rate, "Tasa", 1_000_000 if tool == "iperf3" else 1000),
+        method=base.method,
+        headers=headers,
+        protocol=values.external_protocol,
+        interface=values.external_interface.strip(),
+        destination=destination,
+        port=_positive_integer(values.pps_port, "Puerto", 65535),
+        packet_size=_positive_integer(values.pps_packet_size, "Tamaño del paquete", 1200),
+        count=_positive_integer(values.external_count, "Paquetes", 1_000_000),
+        output=values.report_path,
+    )
 
 
 def _positive_integer(value: str, label: str, maximum: int | None = None) -> int:

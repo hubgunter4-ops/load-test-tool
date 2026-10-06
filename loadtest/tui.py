@@ -15,7 +15,8 @@ from textual.widgets import Button, Checkbox, Footer, Header, Input, Label, Prog
 
 from .cli import _run_chart
 from .charts import generate_charts
-from .gui_config import GuiValues, scenario_from_values
+from .external_tools import EXECUTION_ENGINES, plan
+from .gui_config import GuiValues, external_config_from_values, scenario_from_values
 from .runner import RequestResult
 from .scenarios import SCENARIO_MODES, SCENARIO_PARAMS_EXAMPLES, ScenarioReport, run_scenario, scenario_json
 
@@ -70,6 +71,11 @@ class LoadTestTui(App[None]):
         height: 5;
     }
     #throughput-fields, #pps-fields {
+        display: none;
+        height: auto;
+        margin-bottom: 1;
+    }
+    #external-fields {
         display: none;
         height: auto;
         margin-bottom: 1;
@@ -144,6 +150,8 @@ class LoadTestTui(App[None]):
                     yield Input("30", id="duration", type="number", placeholder="Duración (s)")
                     yield Input("0", id="ramp-up", type="number", placeholder="Rampa (s)")
                     yield Input("10", id="timeout", type="number", placeholder="Timeout (s)")
+                yield Label("Motor de ejecución", classes="field-label")
+                yield Select.from_values(EXECUTION_ENGINES, value="Integrado", id="engine")
                 yield Label("Escenario", classes="field-label")
                 yield Select.from_values(SCENARIO_MODES, value=SCENARIO_MODES[0], id="scenario")
                 yield Label("Parámetros del escenario (JSON)", id="scenario-params-label", classes="field-label")
@@ -160,6 +168,19 @@ class LoadTestTui(App[None]):
                         yield Input("9000", id="pps-port", type="integer", placeholder="Puerto")
                         yield Input("100", id="pps-rate", type="integer", placeholder="Datagramas/s")
                         yield Input("512", id="pps-packet-size", type="integer", placeholder="Bytes/datagrama")
+                with Grid(id="external-fields"):
+                    yield Label("Hilos", classes="field-label")
+                    yield Input("2", id="external-threads", type="integer")
+                    yield Label("Tasa RPS/PPS/Kbit/s", classes="field-label")
+                    yield Input("100", id="external-rate", type="integer")
+                    yield Label("Interfaz Pktgen", classes="field-label")
+                    yield Input("", id="external-interface", placeholder="eth0")
+                    yield Label("Destino Pktgen", classes="field-label")
+                    yield Input("", id="external-destination", placeholder="198.18.0.2")
+                    yield Label("Protocolo", classes="field-label")
+                    yield Select.from_values(("tcp", "udp"), value="tcp", id="external-protocol")
+                    yield Label("Paquetes Pktgen", classes="field-label")
+                    yield Input("1000", id="external-count", type="integer")
                 yield Static("", id="scenario-note")
                 with Vertical(id="request-fields"):
                     yield Label("Tipo de target", classes="field-label")
@@ -211,6 +232,10 @@ class LoadTestTui(App[None]):
         }
         self.query_one("#scenario-note", Static).update(notes.get(scenario, ""))
 
+    @on(Select.Changed, "#engine")
+    def on_engine_changed(self, event: Select.Changed) -> None:
+        self.query_one("#external-fields", Grid).display = str(event.value) != "Integrado"
+
     @on(Select.Changed, "#target-type")
     def on_target_type_changed(self, event: Select.Changed) -> None:
         target = str(event.value or "Auto")
@@ -226,8 +251,23 @@ class LoadTestTui(App[None]):
     def start_run(self) -> None:
         if self._test_running:
             return
+        values = self._values()
+        if values.execution_engine != "Integrado":
+            try:
+                external = external_config_from_values(values)
+                result = plan(external)
+                report_path = Path(values.report_path).expanduser()
+                report_path.parent.mkdir(parents=True, exist_ok=True)
+                rendered = json.dumps(result, indent=2, ensure_ascii=False)
+                report_path.write_text(rendered + "\n", encoding="utf-8")
+                self.query_one("#report-output", TextArea).text = rendered
+                self.query_one("#status", Static).update("Plan externo generado; no se ejecutó tráfico")
+                self.query_one("#event-log", RichLog).write(f"Plan {values.execution_engine} guardado en {report_path}")
+            except (ValueError, OSError) as exc:
+                self.query_one("#status", Static).update(f"Configuración inválida: {exc}")
+            return
         try:
-            config = scenario_from_values(self._values())
+            config = scenario_from_values(values)
         except ValueError as exc:
             self.query_one("#status", Static).update(f"Configuración inválida: {exc}")
             return
@@ -376,6 +416,13 @@ class LoadTestTui(App[None]):
             pps_port=self.query_one("#pps-port", Input).value,
             pps_rate=self.query_one("#pps-rate", Input).value,
             pps_packet_size=self.query_one("#pps-packet-size", Input).value,
+            execution_engine=str(self.query_one("#engine", Select).value),
+            external_threads=self.query_one("#external-threads", Input).value,
+            external_rate=self.query_one("#external-rate", Input).value,
+            external_interface=self.query_one("#external-interface", Input).value,
+            external_destination=self.query_one("#external-destination", Input).value,
+            external_protocol=str(self.query_one("#external-protocol", Select).value),
+            external_count=self.query_one("#external-count", Input).value,
         )
 
     def action_request_quit(self) -> None:
