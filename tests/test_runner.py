@@ -62,6 +62,12 @@ class LoadTestTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             asyncio.run(run_load(LoadConfig(self.url, users=0, duration=0.1)))
 
+    def test_stop_event_can_cancel_before_first_request(self):
+        stop_event = threading.Event()
+        stop_event.set()
+        report = asyncio.run(run_load(LoadConfig(self.url, users=4, duration=0.3), stop_event=stop_event))
+        self.assertEqual(report.total_requests, 0)
+
 
 if __name__ == "__main__":
     unittest.main()

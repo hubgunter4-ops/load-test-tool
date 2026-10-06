@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import json
 import ssl
+import threading
 import time
 from dataclasses import asdict, dataclass, field
 from statistics import mean
@@ -104,8 +105,16 @@ def _request(config: LoadConfig) -> RequestResult:
         )
 
 
-async def run_load(config: LoadConfig, on_progress: Callable[[RequestResult], None] | None = None) -> LoadReport:
-    """Ejecuta usuarios concurrentes durante ``duration`` segundos."""
+async def run_load(
+    config: LoadConfig,
+    on_progress: Callable[[RequestResult], None] | None = None,
+    stop_event: threading.Event | None = None,
+) -> LoadReport:
+    """Ejecuta usuarios concurrentes durante ``duration`` segundos.
+
+    ``stop_event`` permite cancelar cooperativamente una ejecución desde otra
+    hebra, por ejemplo desde una interfaz gráfica.
+    """
     if config.users < 1:
         raise ValueError("users debe ser mayor que cero")
     if config.duration <= 0:
@@ -122,7 +131,7 @@ async def run_load(config: LoadConfig, on_progress: Callable[[RequestResult], No
     async def worker(index: int) -> None:
         if config.ramp_up > 0 and config.users > 1:
             await asyncio.sleep(config.ramp_up * index / (config.users - 1))
-        while time.perf_counter() < deadline:
+        while time.perf_counter() < deadline and not (stop_event and stop_event.is_set()):
             result = await asyncio.to_thread(_request, config)
             async with lock:
                 results.append(result)

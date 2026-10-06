@@ -20,11 +20,30 @@ Para habilitar la generación de gráficos:
 pip install -e '.[charts]'
 ```
 
+Tkinter normalmente viene incluido con Python. En distribuciones Linux que lo separan del intérprete puede ser necesario instalar el paquete del sistema `python3-tk`.
+
 También se puede ejecutar sin instalarlo:
 
 ```bash
 PYTHONPATH=. python3 -m loadtest.cli http://localhost:8000/health -u 20 -d 30 --ramp-up 10
 ```
+
+## Interfaz gráfica Tkinter
+
+Para ejecutar la herramienta desde una interfaz visual:
+
+```bash
+loadtest-gui
+```
+
+La ventana distribuye el flujo en cuatro áreas:
+
+1. **Endpoint y concurrencia**: URL, método HTTP, usuarios, duración, rampa y timeout.
+2. **Petición**: cabeceras por línea y cuerpo opcional para POST/PUT/PATCH.
+3. **Salida**: archivo JSON, directorio de gráficos, formato PNG/SVG y verificación TLS.
+4. **Ejecución e informe**: inicio/detención, métricas en vivo, registro de eventos e informe final.
+
+La prueba se ejecuta en un hilo independiente para que la ventana no se congele. **Detener** activa una cancelación cooperativa y termina después de la petición que esté en curso. Al finalizar se guarda el JSON y, si está seleccionado, se generan automáticamente los tres gráficos. El botón **Generar gráficos desde JSON** permite reutilizar informes anteriores.
 
 ## Ejecutar una prueba
 
