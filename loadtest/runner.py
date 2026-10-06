@@ -33,6 +33,9 @@ class RequestResult:
     status: int | None
     ok: bool
     error: str | None = None
+    bytes_sent: int = 0
+    bytes_received: int = 0
+    request_count: int = 1
 
 
 @dataclass
@@ -49,9 +52,106 @@ class LoadReport:
     latency_ms: dict[str, float | None]
     status_codes: dict[str, int]
     errors: dict[str, int]
+    bytes_sent: int = 0
+    bytes_received: int = 0
+    upload_mbps: float = 0.0
+    download_mbps: float = 0.0
+    packets_per_second: float = 0.0
+    datagrams_sent: int = 0
 
     def to_dict(self) -> dict:
         return asdict(self)
+
+
+def _looks_like_json(value: bytes | None) -> bool:
+    if value is None:
+        return False
+    stripped = value.lstrip()
+    if not stripped:
+        return False
+    try:
+        json.loads(stripped.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return False
+    return True
+
+
+TARGET_HEADER_PRESETS: dict[str, dict[str, str]] = {
+    "Auto": {},
+    "REST API": {"Accept": "application/json"},
+    "GraphQL": {"Accept": "application/json", "Content-Type": "application/json"},
+    "Health Check": {"Accept": "application/json"},
+    "Upload": {"Accept": "application/json", "Content-Type": "application/octet-stream"},
+    "Custom": {},
+}
+
+
+def detect_target_type(url: str, method: str, body: bytes | None = None) -> str:
+    """Detecta el tipo de target con heurísticas simples sobre URL, método y payload."""
+    parsed = urlparse(url)
+    path = (parsed.path or "").lower()
+    method_name = str(method or "GET").upper()
+    host = (parsed.hostname or "").lower()
+
+    if "/graphql" in path or "graphql" in (parsed.query or "").lower():
+        return "GraphQL"
+    if any(token in path for token in ("/api", "/query", "/search", ".json")):
+        return "REST API"
+    if "/health" in path or "/status" in path or host in {"localhost", "127.0.0.1", "::1"} and ("health" in path or "status" in path):
+        return "Health Check"
+    if method_name in {"POST", "PUT", "PATCH"} and body and len(body) > 1024:
+        return "Upload"
+    if _looks_like_json(body):
+        return "REST API"
+    return "Auto"
+
+
+def target_header_preset(target_type: str | None) -> dict[str, str]:
+    """Devuelve el preset de cabeceras para un tipo de target concreto."""
+    normalized = (target_type or "Auto").strip()
+    if normalized == "Auto":
+        normalized = detect_target_type("", "GET")
+    return dict(TARGET_HEADER_PRESETS.get(normalized, TARGET_HEADER_PRESETS["Auto"]))
+
+
+def default_headers_for_target(
+    url: str,
+    method: str,
+    body: bytes | None = None,
+    configured_headers: dict[str, str] | None = None,
+    target_type: str | None = None,
+) -> dict[str, str]:
+    """Devuelve las cabeceras por defecto acordes al destino y permite sobrescribirlas."""
+    default_headers: dict[str, str] = {"User-Agent": "load-test-tool"}
+    selected_target = target_type or detect_target_type(url, method, body)
+    preset = target_header_preset(selected_target)
+    default_headers.update(preset)
+
+    parsed = urlparse(url)
+    path = (parsed.path or "").lower()
+    method_name = str(method or "GET").upper()
+    host = (parsed.hostname or "").lower()
+
+    target_is_api = selected_target in {"REST API", "GraphQL"} or any(token in path for token in ("/api", "/graphql", "/query", "/search", ".json"))
+    if host in {"localhost", "127.0.0.1", "::1"} or host.endswith(".local"):
+        target_is_api = target_is_api or "/health" in path or "/status" in path
+
+    if "Accept" not in default_headers:
+        if target_is_api or method_name in {"POST", "PUT", "PATCH", "DELETE"}:
+            default_headers["Accept"] = "application/json"
+        else:
+            default_headers["Accept"] = "*/*"
+
+    if "Content-Type" not in default_headers and method_name in {"POST", "PUT", "PATCH"}:
+        if _looks_like_json(body):
+            default_headers["Content-Type"] = "application/json"
+        elif body is not None:
+            default_headers["Content-Type"] = "text/plain; charset=utf-8"
+
+    resolved = default_headers.copy()
+    if configured_headers:
+        resolved.update({str(key): str(value) for key, value in configured_headers.items()})
+    return resolved
 
 
 def percentile(values: Iterable[float], p: float) -> float | None:
@@ -71,10 +171,12 @@ def percentile(values: Iterable[float], p: float) -> float | None:
 
 def _request(config: LoadConfig) -> RequestResult:
     started = time.perf_counter()
+    bytes_sent = len(config.body or b"")
+    request_headers = default_headers_for_target(config.url, config.method, config.body, config.headers)
     request = Request(
         config.url,
         data=config.body,
-        headers=config.headers,
+        headers=request_headers,
         method=config.method.upper(),
     )
     context = None
@@ -82,19 +184,24 @@ def _request(config: LoadConfig) -> RequestResult:
         context = ssl._create_unverified_context()
     try:
         with urlopen(request, timeout=config.timeout, context=context) as response:
-            response.read()
+            bytes_received = len(response.read())
             status = response.status
             return RequestResult(
                 latency_ms=(time.perf_counter() - started) * 1000,
                 status=status,
                 ok=200 <= status < 400,
+                bytes_sent=bytes_sent,
+                bytes_received=bytes_received,
             )
     except HTTPError as exc:
+        bytes_received = len(exc.read())
         return RequestResult(
             latency_ms=(time.perf_counter() - started) * 1000,
             status=exc.code,
             ok=False,
             error=f"HTTP {exc.code}",
+            bytes_sent=bytes_sent,
+            bytes_received=bytes_received,
         )
     except (URLError, TimeoutError, OSError) as exc:
         return RequestResult(
@@ -102,6 +209,7 @@ def _request(config: LoadConfig) -> RequestResult:
             status=None,
             ok=False,
             error=type(exc).__name__,
+            bytes_sent=bytes_sent,
         )
 
 
@@ -151,6 +259,8 @@ async def run_load(
             errors[result.error] = errors.get(result.error, 0) + 1
     total = len(results)
     successful = sum(1 for r in results if r.ok)
+    bytes_sent = sum(result.bytes_sent for result in results)
+    bytes_received = sum(result.bytes_received for result in results)
     return LoadReport(
         url=config.url,
         method=config.method.upper(),
@@ -171,6 +281,10 @@ async def run_load(
         },
         status_codes=dict(sorted(statuses.items())),
         errors=dict(sorted(errors.items())),
+        bytes_sent=bytes_sent,
+        bytes_received=bytes_received,
+        upload_mbps=round(bytes_sent * 8 / elapsed / 1_000_000, 4),
+        download_mbps=round(bytes_received * 8 / elapsed / 1_000_000, 4),
     )
 
 
