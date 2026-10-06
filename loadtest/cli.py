@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import sys
 from pathlib import Path
 
-from .runner import LoadConfig, LoadReport, report_json, run_load
+from .runner import LoadConfig, LoadReport
+from .scenarios import SCENARIO_MODES, ScenarioConfig, run_scenario, scenario_json
 
 
 def _headers(values: list[str]) -> dict[str, str]:
@@ -34,6 +36,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--timeout", type=float, default=10, help="timeout por petición en segundos")
     parser.add_argument("--insecure", action="store_true", help="no verificar certificados TLS")
     parser.add_argument("-o", "--output", type=Path, help="guardar el informe JSON en este archivo")
+    parser.add_argument("--scenario", choices=SCENARIO_MODES, default="Carga estándar", help="escenario de estrés a ejecutar")
+    parser.add_argument("--scenario-params", default="{}", help="parámetros específicos del escenario como JSON")
     return parser
 
 
@@ -95,13 +99,20 @@ def main(argv: list[str] | None = None) -> int:
             timeout=args.timeout,
             verify_tls=not args.insecure,
         )
-        report = asyncio.run(run_load(config))
+        try:
+            scenario_params = json.loads(args.scenario_params or "{}")
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"--scenario-params no es JSON válido: {exc.msg}") from exc
+        if not isinstance(scenario_params, dict):
+            raise ValueError("--scenario-params debe ser un objeto JSON")
+        scenario_report = asyncio.run(run_scenario(ScenarioConfig(config, args.scenario, scenario_params)))
+        report = scenario_report.aggregate
     except (OSError, ValueError, argparse.ArgumentTypeError) as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 2
     _print_report(report)
     if args.output:
-        args.output.write_text(report_json(report) + "\n", encoding="utf-8")
+        args.output.write_text(scenario_json(scenario_report) + "\n", encoding="utf-8")
         print(f"Informe JSON: {args.output}")
     return 0
 

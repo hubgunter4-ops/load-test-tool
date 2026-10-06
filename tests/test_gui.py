@@ -1,6 +1,6 @@
 import unittest
 
-from loadtest.gui_config import GuiValues, config_from_values, parse_headers_text
+from loadtest.gui_config import GuiValues, config_from_values, parse_headers_text, scenario_from_values
 
 
 class GuiHelpersTests(unittest.TestCase):
@@ -41,6 +41,12 @@ class GuiHelpersTests(unittest.TestCase):
         values = GuiValues("http://localhost", "GET", "0", "20", "0", "10", "", "", True, "report.json", "charts", "png", True)
         with self.assertRaisesRegex(ValueError, "mayor que cero"):
             config_from_values(values)
+
+    def test_scenario_from_values_parses_parameters(self):
+        values = GuiValues("http://localhost", "GET", "2", "1", "0", "1", "", "", True, "report.json", "charts", "png", True, "Spike Test", '{"peak_users": 8}')
+        scenario = scenario_from_values(values)
+        self.assertEqual(scenario.mode, "Spike Test")
+        self.assertEqual(scenario.params["peak_users"], 8)
 
 
 if __name__ == "__main__":

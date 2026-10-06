@@ -12,8 +12,9 @@ from tkinter import filedialog, messagebox, ttk
 from typing import Any
 
 from .charts import generate_charts
-from .gui_config import GuiValues, config_from_values
-from .runner import LoadConfig, LoadReport, RequestResult, report_json, run_load
+from .gui_config import GuiValues, scenario_from_values
+from .runner import LoadReport, RequestResult
+from .scenarios import SCENARIO_MODES, ScenarioReport, run_scenario, scenario_json
 
 
 class LoadTestApp(tk.Tk):
@@ -39,6 +40,7 @@ class LoadTestApp(tk.Tk):
 
     def _build_variables(self) -> None:
         self.url_var = tk.StringVar(value="http://localhost:8000/health")
+        self.scenario_var = tk.StringVar(value=SCENARIO_MODES[0])
         self.method_var = tk.StringVar(value="GET")
         self.users_var = tk.StringVar(value="10")
         self.duration_var = tk.StringVar(value="30")
@@ -55,6 +57,7 @@ class LoadTestApp(tk.Tk):
         self.error_var = tk.StringVar(value="Errores: 0")
         self.latency_var = tk.StringVar(value="Latencia p95: —")
         self.progress_var = tk.DoubleVar(value=0)
+        self.phase_var = tk.StringVar(value="Sin fase activa")
 
     def _build_style(self) -> None:
         style = ttk.Style(self)
@@ -82,6 +85,17 @@ class LoadTestApp(tk.Tk):
         self._build_results_panel(right)
 
     def _build_config_panel(self, parent: ttk.Frame) -> None:
+        scenario = ttk.LabelFrame(parent, text="0. Tipo de prueba", style="Section.TLabelframe", padding=10)
+        scenario.pack(fill="x", pady=(0, 10))
+        ttk.Label(scenario, text="Escenario").pack(anchor="w")
+        scenario_combo = ttk.Combobox(scenario, textvariable=self.scenario_var, values=SCENARIO_MODES, state="readonly")
+        scenario_combo.pack(fill="x", pady=(4, 7))
+        ttk.Label(scenario, text="Parámetros específicos (JSON)").pack(anchor="w")
+        self.scenario_params_text = tk.Text(scenario, height=4, wrap="none", undo=True)
+        self.scenario_params_text.insert("1.0", '{\n  "peak_users": 100\n}')
+        self.scenario_params_text.pack(fill="x", pady=(4, 0))
+        ttk.Label(scenario, text="Ej.: peak_users, stages, mix, failure_url, payload_size", foreground="#64748b").pack(anchor="w", pady=(4, 0))
+
         endpoint = ttk.LabelFrame(parent, text="1. Endpoint y concurrencia", style="Section.TLabelframe", padding=10)
         endpoint.pack(fill="x", pady=(0, 10))
         self._field(endpoint, "URL", self.url_var, 0, 0, 3)
@@ -126,6 +140,7 @@ class LoadTestApp(tk.Tk):
         status = ttk.LabelFrame(parent, text="Ejecución", style="Section.TLabelframe", padding=10)
         status.pack(fill="x", pady=(0, 10))
         ttk.Label(status, textvariable=self.status_var).pack(anchor="w")
+        ttk.Label(status, textvariable=self.phase_var, foreground="#64748b").pack(anchor="w", pady=(2, 0))
         ttk.Progressbar(status, variable=self.progress_var, maximum=100, mode="determinate").pack(fill="x", pady=(8, 0))
 
         metrics = ttk.LabelFrame(parent, text="Métricas en vivo", style="Section.TLabelframe", padding=10)
@@ -181,13 +196,14 @@ class LoadTestApp(tk.Tk):
             headers=self.headers_text.get("1.0", "end"), body=self.body_text.get("1.0", "end-1c"),
             verify_tls=self.tls_var.get(), report_path=self.report_var.get(), chart_dir=self.chart_dir_var.get(),
             chart_format=self.format_var.get(), auto_charts=self.auto_charts_var.get(),
+            scenario=self.scenario_var.get(), scenario_params=self.scenario_params_text.get("1.0", "end-1c"),
         )
 
     def _start(self) -> None:
         if self._worker and self._worker.is_alive():
             return
         try:
-            config = config_from_values(self._values())
+            config = scenario_from_values(self._values())
         except ValueError as exc:
             messagebox.showerror("Configuración inválida", str(exc))
             return
@@ -206,6 +222,7 @@ class LoadTestApp(tk.Tk):
         self.error_var.set("Errores: 0")
         self.latency_var.set("Latencia p95: —")
         self.status_var.set("Ejecutando…")
+        self.phase_var.set("Preparando escenario…")
         self._set_text(self.report_text, "")
         self._draw_dashboard()
         self._append_log("Inicio de la prueba")
@@ -213,10 +230,10 @@ class LoadTestApp(tk.Tk):
         self.stop_button.configure(state="normal")
         self.chart_button.configure(state="disabled")
 
-    def _worker_run(self, config: LoadConfig) -> None:
+    def _worker_run(self, config: Any) -> None:
         assert self._stop_event is not None
         try:
-            report = asyncio.run(run_load(config, on_progress=lambda result: self._events.put(("progress", result)), stop_event=self._stop_event))
+            report = asyncio.run(run_scenario(config, on_progress=lambda result: self._events.put(("progress", result)), on_phase=lambda name, index, total: self._events.put(("phase", (name, index, total))), stop_event=self._stop_event))
             self._events.put(("complete", report))
         except Exception as exc:  # la GUI debe recibir cualquier fallo del worker
             self._events.put(("error", exc))
@@ -234,6 +251,8 @@ class LoadTestApp(tk.Tk):
                 event, payload = self._events.get_nowait()
                 if event == "progress":
                     self._update_progress(payload)
+                elif event == "phase":
+                    self._update_phase(payload)
                 elif event == "complete":
                     self._complete(payload)
                 elif event == "error":
@@ -241,6 +260,12 @@ class LoadTestApp(tk.Tk):
         except queue.Empty:
             pass
         self.after(100, self._drain_events)
+
+    def _update_phase(self, payload: tuple[str, int, int]) -> None:
+        name, index, total = payload
+        self.phase_var.set(f"Fase {index}/{total}: {name}")
+        self.progress_var.set((index - 1) * 100 / max(total, 1))
+        self._append_log(f"Fase {index}/{total}: {name}")
 
     def _update_progress(self, result: RequestResult) -> None:
         current = int(self.request_var.get().split(":", 1)[1].strip()) + 1
@@ -299,19 +324,21 @@ class LoadTestApp(tk.Tk):
         else:
             canvas.create_text(right_x + right_w / 2, right_y + right_h / 2, text="Sin respuestas todavía", fill="#94a3b8")
 
-    def _complete(self, report: LoadReport) -> None:
+    def _complete(self, scenario_report: ScenarioReport) -> None:
+        report = scenario_report.aggregate
         self._last_report = report
         values = self._values()
         report_path = Path(values.report_path).expanduser()
         report_path.parent.mkdir(parents=True, exist_ok=True)
-        report_path.write_text(report_json(report) + "\n", encoding="utf-8")
+        report_path.write_text(scenario_json(scenario_report) + "\n", encoding="utf-8")
         self._last_report_path = report_path
         self.status_var.set("Prueba detenida" if self._stop_event and self._stop_event.is_set() else "Prueba completada")
+        self.phase_var.set(f"Escenario: {scenario_report.scenario} · {len(scenario_report.phases)} fase(s)")
         self.progress_var.set(100)
         self.rps_var.set(f"RPS: {report.requests_per_second:.2f}")
         self.error_var.set(f"Errores: {report.failed_requests} ({report.error_rate_percent:.2f}%)")
         self.latency_var.set(f"Latencia p95: {report.latency_ms['p95']} ms")
-        self._set_text(self.report_text, json.dumps(report.to_dict(), indent=2, ensure_ascii=False))
+        self._set_text(self.report_text, json.dumps(scenario_report.to_dict(), indent=2, ensure_ascii=False))
         self._append_log(f"Informe guardado en {report_path}")
         if values.auto_charts:
             self._generate_charts(report_path, values.chart_dir, values.chart_format)

@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "load-test-tool"
-version = "0.3.0"
-description = "CLI e interfaz Tkinter para pruebas de carga HTTP y visualización de resultados"
+version = "0.4.0"
+description = "CLI e interfaz Tkinter para escenarios de estrés HTTP y visualización de resultados"
 readme = "README.md"
 requires-python = ">=3.10"
 authors = [{name = "Equipo de Ingeniería"}]

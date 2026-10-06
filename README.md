@@ -47,6 +47,43 @@ La prueba se ejecuta en un hilo independiente para que la ventana no se congele.
 
 El panel **Dashboard de ejecución** se actualiza durante la prueba con una línea de latencia por solicitud y barras de distribución de códigos HTTP. La vista previa de la distribución está disponible en [docs/dashboard-preview.svg](docs/dashboard-preview.svg).
 
+### Escenarios de estrés
+
+La GUI y el motor comparten un selector de escenarios. Los parámetros específicos se introducen como JSON en la sección **Tipo de prueba**:
+
+| Orden | Escenario | Parámetros principales |
+|---:|---|---|
+| 1 | **Spike Test** | `peak_users` para el pico de usuarios |
+| 2 | **Stress Test progresivo** | `stages`, por ejemplo `[10, 25, 50, 100]` |
+| 3 | **Soak Test** | Usa `duration` y `users` como carga sostenida |
+| 4 | **Escenarios mixtos** | `mix` con `url`, `method`, `weight`, `headers` y `body` |
+| 5 | **Recuperación y fallos** | `failure_url` opcional; por defecto usa un fallo local controlado |
+| 6 | **Prueba específica de base de datos** | `query_type` para etiquetar la consulta |
+| 7 | **Payload y rate limiting** | `payload_size`, `payload_seed` y `rate_limit` |
+
+Ejemplos de parámetros:
+
+```json
+{"peak_users": 250}
+```
+
+```json
+{"stages": [10, 25, 50, 100]}
+```
+
+```json
+{"mix": [
+  {"url": "http://localhost:8000/api/products", "weight": 70},
+  {"url": "http://localhost:8000/api/orders", "method": "POST", "weight": 30, "body": "{\"items\": []}"}
+]}
+```
+
+```json
+{"payload_size": 4096, "payload_seed": "sample", "rate_limit": 50}
+```
+
+Cada modo genera el mismo formato de métricas agregadas y conserva `scenario` y `phases` en el JSON para que el dashboard y los gráficos puedan comparar fases. La prueba de recuperación usa por defecto `127.0.0.1:1` para producir un fallo controlado sin enviar tráfico a terceros.
+
 ## Ejecutar una prueba
 
 ```bash
@@ -64,6 +101,15 @@ loadtest http://localhost:8000/api/query -X POST \
   -H 'Content-Type: application/json' \
   --body '{"query":"SELECT 1"}' -u 10 -d 20 \
   --output reports/query.json
+```
+
+También se puede ejecutar un escenario desde la terminal:
+
+```bash
+loadtest https://staging.example.com/health \
+  --scenario "Spike Test" \
+  --scenario-params '{"peak_users":250}' \
+  --users 20 --duration 60 --output reports/spike.json
 ```
 
 ## Generar gráficos desde JSON
@@ -130,4 +176,4 @@ python3 -m unittest discover -v
 
 ## Estado del repositorio
 
-Versión `0.2.0`, con pruebas de carga, exportación JSON y gráficos PNG/SVG.
+Versión `0.4.0`, con siete escenarios de estrés, interfaz Tkinter, dashboard en vivo, exportación JSON y gráficos PNG/SVG.

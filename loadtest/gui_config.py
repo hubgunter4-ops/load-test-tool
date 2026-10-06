@@ -2,8 +2,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
 
 from .runner import LoadConfig
+from .scenarios import ScenarioConfig
 
 
 @dataclass(frozen=True)
@@ -21,6 +23,8 @@ class GuiValues:
     chart_dir: str
     chart_format: str
     auto_charts: bool
+    scenario: str = "Carga estándar"
+    scenario_params: str = "{}"
 
 
 def parse_headers_text(value: str) -> dict[str, str]:
@@ -67,3 +71,14 @@ def config_from_values(values: GuiValues) -> LoadConfig:
         timeout=timeout,
         verify_tls=values.verify_tls,
     )
+
+
+def scenario_from_values(values: GuiValues) -> ScenarioConfig:
+    """Convierte los campos de la interfaz en un escenario ejecutable."""
+    try:
+        params = json.loads(values.scenario_params or "{}")
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"Parámetros del escenario no son JSON válido: {exc.msg}") from exc
+    if not isinstance(params, dict):
+        raise ValueError("Los parámetros del escenario deben ser un objeto JSON")
+    return ScenarioConfig(base=config_from_values(values), mode=values.scenario, params=params)
